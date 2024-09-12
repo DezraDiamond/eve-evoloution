@@ -10,169 +10,53 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Wuerstchen
+# Würstchen
 
-The [Wuerstchen](https://hf.co/papers/2306.00637) model drastically reduces computational costs by compressing the latent space by 42x, without compromising image quality and accelerating inference. During training, Wuerstchen uses two models (VQGAN + autoencoder) to compress the latents, and then a third model (text-conditioned latent diffusion model) is conditioned on this highly compressed space to generate an image.
+<img src="https://github.com/dome272/Wuerstchen/assets/61938694/0617c863-165a-43ee-9303-2a17299a0cf9">
 
-To fit the prior model into GPU memory and to speedup training, try enabling `gradient_accumulation_steps`, `gradient_checkpointing`, and `mixed_precision` respectively.
+[Wuerstchen: An Efficient Architecture for Large-Scale Text-to-Image Diffusion Models](https://huggingface.co/papers/2306.00637) is by Pablo Pernias, Dominic Rampas, Mats L. Richter and Christopher Pal and Marc Aubreville.
 
-This guide explores the [train_text_to_image_prior.py](https://github.com/huggingface/diffusers/blob/main/examples/wuerstchen/text_to_image/train_text_to_image_prior.py) script to help you become more familiar with it, and how you can adapt it for your own use-case.
+The abstract from the paper is:
 
-Before running the script, make sure you install the library from source:
+*We introduce Würstchen, a novel architecture for text-to-image synthesis that combines competitive performance with unprecedented cost-effectiveness for large-scale text-to-image diffusion models. A key contribution of our work is to develop a latent diffusion technique in which we learn a detailed but extremely compact semantic image representation used to guide the diffusion process. This highly compressed representation of an image provides much more detailed guidance compared to latent representations of language and this significantly reduces the computational requirements to achieve state-of-the-art results. Our approach also improves the quality of text-conditioned image generation based on our user preference study. The training requirements of our approach consists of 24,602 A100-GPU hours - compared to Stable Diffusion 2.1's 200,000 GPU hours. Our approach also requires less training data to achieve these results. Furthermore, our compact latent representations allows us to perform inference over twice as fast, slashing the usual costs and carbon footprint of a state-of-the-art (SOTA) diffusion model significantly, without compromising the end performance. In a broader comparison against SOTA models our approach is substantially more efficient and compares favorably in terms of image quality. We believe that this work motivates more emphasis on the prioritization of both performance and computational accessibility.*
 
-```bash
-git clone https://github.com/huggingface/diffusers
-cd diffusers
-pip install .
-```
+## Würstchen Overview
+Würstchen is a diffusion model, whose text-conditional model works in a highly compressed latent space of images. Why is this important? Compressing data can reduce computational costs for both training and inference by magnitudes. Training on 1024x1024 images is way more expensive than training on 32x32. Usually, other works make use of a relatively small compression, in the range of 4x - 8x spatial compression. Würstchen takes this to an extreme. Through its novel design, we achieve a 42x spatial compression. This was unseen before because common methods fail to faithfully reconstruct detailed images after 16x spatial compression. Würstchen employs a two-stage compression, what we call Stage A and Stage B. Stage A is a VQGAN, and Stage B is a Diffusion Autoencoder (more details can be found in the [paper](https://huggingface.co/papers/2306.00637)). A third model, Stage C, is learned in that highly compressed latent space. This training requires fractions of the compute used for current top-performing models, while also allowing cheaper and faster inference.
 
-Then navigate to the example folder containing the training script and install the required dependencies for the script you're using:
+## Würstchen v2 comes to Diffusers
 
-```bash
-cd examples/wuerstchen/text_to_image
-pip install -r requirements.txt
-```
+After the initial paper release, we have improved numerous things in the architecture, training and sampling, making Würstchen competitive to current state-of-the-art models in many ways. We are excited to release this new version together with Diffusers. Here is a list of the improvements.
 
-<Tip>
+- Higher resolution (1024x1024 up to 2048x2048)
+- Faster inference
+- Multi Aspect Resolution Sampling
+- Better quality
 
-🤗 Accelerate is a library for helping you train on multiple GPUs/TPUs or with mixed-precision. It'll automatically configure your training setup based on your hardware and environment. Take a look at the 🤗 Accelerate [Quick tour](https://huggingface.co/docs/accelerate/quicktour) to learn more.
 
-</Tip>
+We are releasing 3 checkpoints for the text-conditional image generation model (Stage C). Those are:
 
-Initialize an 🤗 Accelerate environment:
+- v2-base
+- v2-aesthetic
+- **(default)** v2-interpolated (50% interpolation between v2-base and v2-aesthetic)
 
-```bash
-accelerate config
-```
+We recommend using v2-interpolated, as it has a nice touch of both photorealism and aesthetics. Use v2-base for finetunings as it does not have a style bias and use v2-aesthetic for very artistic generations.
+A comparison can be seen here:
 
-To setup a default 🤗 Accelerate environment without choosing any configurations:
+<img src="https://github.com/dome272/Wuerstchen/assets/61938694/2914830f-cbd3-461c-be64-d50734f4b49d" width=500>
 
-```bash
-accelerate config default
-```
+## Text-to-Image Generation
 
-Or if your environment doesn't support an interactive shell, like a notebook, you can use:
+For the sake of usability, Würstchen can be used with a single pipeline. This pipeline can be used as follows:
 
-```py
-from accelerate.utils import write_basic_config
-
-write_basic_config()
-```
-
-Lastly, if you want to train a model on your own dataset, take a look at the [Create a dataset for training](fort-obsidian/diffusers/docs/source/en/training/create_dataset.md) guide to learn how to create a dataset that works with the training script.
-
-<Tip>
-
-The following sections highlight parts of the training scripts that are important for understanding how to modify it, but it doesn't cover every aspect of the [script](https://github.com/huggingface/diffusers/blob/main/examples/wuerstchen/text_to_image/train_text_to_image_prior.py) in detail. If you're interested in learning more, feel free to read through the scripts and let us know if you have any questions or concerns.
-
-</Tip>
-
-## Script parameters
-
-The training scripts provides many parameters to help you customize your training run. All of the parameters and their descriptions are found in the [`parse_args()`](https://github.com/huggingface/diffusers/blob/6e68c71503682c8693cb5b06a4da4911dfd655ee/examples/wuerstchen/text_to_image/train_text_to_image_prior.py#L192) function. It provides default values for each parameter, such as the training batch size and learning rate, but you can also set your own values in the training command if you'd like.
-
-For example, to speedup training with mixed precision using the fp16 format, add the `--mixed_precision` parameter to the training command:
-
-```bash
-accelerate launch train_text_to_image_prior.py \
-  --mixed_precision="fp16"
-```
-
-Most of the parameters are identical to the parameters in the [Text-to-image](fort-obsidian/diffusers/docs/source/en/training/text2image.md#script-parameters) training guide, so let's dive right into the Wuerstchen training script!
-
-## Training script
-
-The training script is also similar to the [Text-to-image](fort-obsidian/diffusers/docs/source/en/training/text2image.md#training-script) training guide, but it's been modified to support Wuerstchen. This guide focuses on the code that is unique to the Wuerstchen training script.
-
-The [`main()`](https://github.com/huggingface/diffusers/blob/6e68c71503682c8693cb5b06a4da4911dfd655ee/examples/wuerstchen/text_to_image/train_text_to_image_prior.py#L441) function starts by initializing the image encoder - an [EfficientNet](https://github.com/huggingface/diffusers/blob/main/examples/wuerstchen/text_to_image/modeling_efficient_net_encoder.py) - in addition to the usual scheduler and tokenizer.
-
-```py
-with ContextManagers(deepspeed_zero_init_disabled_context_manager()):
-    pretrained_checkpoint_file = hf_hub_download("dome272/wuerstchen", filename="model_v2_stage_b.pt")
-    state_dict = torch.load(pretrained_checkpoint_file, map_location="cpu")
-    image_encoder = EfficientNetEncoder()
-    image_encoder.load_state_dict(state_dict["effnet_state_dict"])
-    image_encoder.eval()
-```
-
-You'll also load the [`WuerstchenPrior`] model for optimization.
-
-```py
-prior = WuerstchenPrior.from_pretrained(args.pretrained_prior_model_name_or_path, subfolder="prior")
-
-optimizer = optimizer_cls(
-    prior.parameters(),
-    lr=args.learning_rate,
-    betas=(args.adam_beta1, args.adam_beta2),
-    weight_decay=args.adam_weight_decay,
-    eps=args.adam_epsilon,
-)
-```
-
-Next, you'll apply some [transforms](https://github.com/huggingface/diffusers/blob/65ef7a0c5c594b4f84092e328fbdd73183613b30/examples/wuerstchen/text_to_image/train_text_to_image_prior.py#L656) to the images and [tokenize](https://github.com/huggingface/diffusers/blob/65ef7a0c5c594b4f84092e328fbdd73183613b30/examples/wuerstchen/text_to_image/train_text_to_image_prior.py#L637) the captions:
-
-```py
-def preprocess_train(examples):
-    images = [image.convert("RGB") for image in examples[image_column]]
-    examples["effnet_pixel_values"] = [effnet_transforms(image) for image in images]
-    examples["text_input_ids"], examples["text_mask"] = tokenize_captions(examples)
-    return examples
-```
-
-Finally, the [training loop](https://github.com/huggingface/diffusers/blob/65ef7a0c5c594b4f84092e328fbdd73183613b30/examples/wuerstchen/text_to_image/train_text_to_image_prior.py#L656) handles compressing the images to latent space with the `EfficientNetEncoder`, adding noise to the latents, and predicting the noise residual with the [`WuerstchenPrior`] model.
-
-```py
-pred_noise = prior(noisy_latents, timesteps, prompt_embeds)
-```
-
-If you want to learn more about how the training loop works, check out the [Understanding pipelines, models and schedulers](fort-obsidian/diffusers/docs/source/en/using-diffusers/write_own_pipeline.md) tutorial which breaks down the basic pattern of the denoising process.
-
-## Launch the script
-
-Once you’ve made all your changes or you’re okay with the default configuration, you’re ready to launch the training script! 🚀
-
-Set the `DATASET_NAME` environment variable to the dataset name from the Hub. This guide uses the [Naruto BLIP captions](https://huggingface.co/datasets/lambdalabs/naruto-blip-captions) dataset, but you can create and train on your own datasets as well (see the [Create a dataset for training](fort-obsidian/diffusers/docs/source/en/training/create_dataset.md) guide).
-
-<Tip>
-
-To monitor training progress with Weights & Biases, add the `--report_to=wandb` parameter to the training command. You’ll also need to add the `--validation_prompt` to the training command to keep track of results. This can be really useful for debugging the model and viewing intermediate results.
-
-</Tip>
-
-```bash
-export DATASET_NAME="lambdalabs/naruto-blip-captions"
-
-accelerate launch  train_text_to_image_prior.py \
-  --mixed_precision="fp16" \
-  --dataset_name=$DATASET_NAME \
-  --resolution=768 \
-  --train_batch_size=4 \
-  --gradient_accumulation_steps=4 \
-  --gradient_checkpointing \
-  --dataloader_num_workers=4 \
-  --max_train_steps=15000 \
-  --learning_rate=1e-05 \
-  --max_grad_norm=1 \
-  --checkpoints_total_limit=3 \
-  --lr_scheduler="constant" \
-  --lr_warmup_steps=0 \
-  --validation_prompts="A robot naruto, 4k photo" \
-  --report_to="wandb" \
-  --push_to_hub \
-  --output_dir="wuerstchen-prior-naruto-model"
-```
-
-Once training is complete, you can use your newly trained model for inference!
-
-```py
+```python
 import torch
 from diffusers import AutoPipelineForText2Image
 from diffusers.pipelines.wuerstchen import DEFAULT_STAGE_C_TIMESTEPS
 
-pipeline = AutoPipelineForText2Image.from_pretrained("path/to/saved/model", torch_dtype=torch.float16).to("cuda")
+pipe = AutoPipelineForText2Image.from_pretrained("warp-ai/wuerstchen", torch_dtype=torch.float16).to("cuda")
 
-caption = "A cute bird naruto holding a shield"
-images = pipeline(
+caption = "Anthropomorphic cat dressed as a fire fighter"
+images = pipe(
     caption,
     width=1024,
     height=1536,
@@ -182,8 +66,98 @@ images = pipeline(
 ).images
 ```
 
-## Next steps
+For explanation purposes, we can also initialize the two main pipelines of Würstchen individually. Würstchen consists of 3 stages: Stage C, Stage B, Stage A. They all have different jobs and work only together. When generating text-conditional images, Stage C will first generate the latents in a very compressed latent space. This is what happens in the `prior_pipeline`. Afterwards, the generated latents will be passed to Stage B, which decompresses the latents into a bigger latent space of a VQGAN. These latents can then be decoded by Stage A, which is a VQGAN, into the pixel-space. Stage B & Stage A are both encapsulated in the `decoder_pipeline`. For more details, take a look at the [paper](https://huggingface.co/papers/2306.00637).
 
-Congratulations on training a Wuerstchen model! To learn more about how to use your new model, the following may be helpful:
+```python
+import torch
+from diffusers import WuerstchenDecoderPipeline, WuerstchenPriorPipeline
+from diffusers.pipelines.wuerstchen import DEFAULT_STAGE_C_TIMESTEPS
 
-- Take a look at the [Wuerstchen](fort-obsidian/diffusers/docs/source/en/api/pipelines/wuerstchen.md#text-to-image-generation) API documentation to learn more about how to use the pipeline for text-to-image generation and its limitations.
+device = "cuda"
+dtype = torch.float16
+num_images_per_prompt = 2
+
+prior_pipeline = WuerstchenPriorPipeline.from_pretrained(
+    "warp-ai/wuerstchen-prior", torch_dtype=dtype
+).to(device)
+decoder_pipeline = WuerstchenDecoderPipeline.from_pretrained(
+    "warp-ai/wuerstchen", torch_dtype=dtype
+).to(device)
+
+caption = "Anthropomorphic cat dressed as a fire fighter"
+negative_prompt = ""
+
+prior_output = prior_pipeline(
+    prompt=caption,
+    height=1024,
+    width=1536,
+    timesteps=DEFAULT_STAGE_C_TIMESTEPS,
+    negative_prompt=negative_prompt,
+    guidance_scale=4.0,
+    num_images_per_prompt=num_images_per_prompt,
+)
+decoder_output = decoder_pipeline(
+    image_embeddings=prior_output.image_embeddings,
+    prompt=caption,
+    negative_prompt=negative_prompt,
+    guidance_scale=0.0,
+    output_type="pil",
+).images[0]
+decoder_output
+```
+
+## Speed-Up Inference
+You can make use of `torch.compile` function and gain a speed-up of about 2-3x:
+
+```python
+prior_pipeline.prior = torch.compile(prior_pipeline.prior, mode="reduce-overhead", fullgraph=True)
+decoder_pipeline.decoder = torch.compile(decoder_pipeline.decoder, mode="reduce-overhead", fullgraph=True)
+```
+
+## Limitations
+
+- Due to the high compression employed by Würstchen, generations can lack a good amount
+of detail. To our human eye, this is especially noticeable in faces, hands etc.
+- **Images can only be generated in 128-pixel steps**, e.g. the next higher resolution
+after 1024x1024 is 1152x1152
+- The model lacks the ability to render correct text in images
+- The model often does not achieve photorealism
+- Difficult compositional prompts are hard for the model
+
+The original codebase, as well as experimental ideas, can be found at [dome272/Wuerstchen](https://github.com/dome272/Wuerstchen).
+
+
+## WuerstchenCombinedPipeline
+
+[[autodoc]] WuerstchenCombinedPipeline
+	- all
+	- __call__
+
+## WuerstchenPriorPipeline
+
+[[autodoc]] WuerstchenPriorPipeline
+	- all
+	- __call__
+
+## WuerstchenPriorPipelineOutput
+
+[[autodoc]] pipelines.wuerstchen.pipeline_wuerstchen_prior.WuerstchenPriorPipelineOutput
+
+## WuerstchenDecoderPipeline
+
+[[autodoc]] WuerstchenDecoderPipeline
+	- all
+	- __call__
+
+## Citation
+
+```bibtex
+      @misc{pernias2023wuerstchen,
+            title={Wuerstchen: An Efficient Architecture for Large-Scale Text-to-Image Diffusion Models},
+            author={Pablo Pernias and Dominic Rampas and Mats L. Richter and Christopher J. Pal and Marc Aubreville},
+            year={2023},
+            eprint={2306.00637},
+            archivePrefix={arXiv},
+            primaryClass={cs.CV}
+      }
+```

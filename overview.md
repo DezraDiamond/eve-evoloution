@@ -10,54 +10,102 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Overview
+# Pipelines
 
-🤗 Diffusers provides a collection of training scripts for you to train your own diffusion models. You can find all of our training scripts in [diffusers/examples](https://github.com/huggingface/diffusers/tree/main/examples).
+Pipelines provide a simple way to run state-of-the-art diffusion models in inference by bundling all of the necessary components (multiple independently-trained models, schedulers, and processors) into a single end-to-end class. Pipelines are flexible and they can be adapted to use different schedulers or even model components.
 
-Each training script is:
+All pipelines are built from the base [`DiffusionPipeline`] class which provides basic functionality for loading, downloading, and saving all the components. Specific pipeline types (for example [`StableDiffusionPipeline`]) loaded with [`~DiffusionPipeline.from_pretrained`] are automatically detected and the pipeline components are loaded and passed to the `__init__` function of the pipeline.
 
-- **Self-contained**: the training script does not depend on any local files, and all packages required to run the script are installed from the `requirements.txt` file.
-- **Easy-to-tweak**: the training scripts are an example of how to train a diffusion model for a specific task and won't work out-of-the-box for every training scenario. You'll likely need to adapt the training script for your specific use-case. To help you with that, we've fully exposed the data preprocessing code and the training loop so you can modify it for your own use.
-- **Beginner-friendly**: the training scripts are designed to be beginner-friendly and easy to understand, rather than including the latest state-of-the-art methods to get the best and most competitive results. Any training methods we consider too complex are purposefully left out.
-- **Single-purpose**: each training script is expressly designed for only one task to keep it readable and understandable.
+<Tip warning={true}>
 
-Our current collection of training scripts include:
+You shouldn't use the [`DiffusionPipeline`] class for training. Individual components (for example, [`UNet2DModel`] and [`UNet2DConditionModel`]) of diffusion pipelines are usually trained individually, so we suggest directly working with them instead.
 
-| Training | SDXL-support | LoRA-support | Flax-support |
-|---|---|---|---|
-| [unconditional image generation](https://github.com/huggingface/diffusers/tree/main/examples/unconditional_image_generation) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb) |  |  |  |
-| [text-to-image](https://github.com/huggingface/diffusers/tree/main/examples/text_to_image) | 👍 | 👍 | 👍 |
-| [textual inversion](https://github.com/huggingface/diffusers/tree/main/examples/textual_inversion) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/sd_textual_inversion_training.ipynb) |  |  | 👍 |
-| [DreamBooth](https://github.com/huggingface/diffusers/tree/main/examples/dreambooth) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/sd_dreambooth_training.ipynb) | 👍 | 👍 | 👍 |
-| [ControlNet](https://github.com/huggingface/diffusers/tree/main/examples/controlnet) | 👍 |  | 👍 |
-| [InstructPix2Pix](https://github.com/huggingface/diffusers/tree/main/examples/instruct_pix2pix) | 👍 |  |  |
-| [Custom Diffusion](https://github.com/huggingface/diffusers/tree/main/examples/custom_diffusion) |  |  |  |
-| [T2I-Adapters](https://github.com/huggingface/diffusers/tree/main/examples/t2i_adapter) | 👍 |  |  |
-| [Kandinsky 2.2](https://github.com/huggingface/diffusers/tree/main/examples/kandinsky2_2/text_to_image) |  | 👍 |  |
-| [Wuerstchen](https://github.com/huggingface/diffusers/tree/main/examples/wuerstchen/text_to_image) |  | 👍 |  |
+<br>
 
-These examples are **actively** maintained, so please feel free to open an issue if they aren't working as expected. If you feel like another training example should be included, you're more than welcome to start a [Feature Request](https://github.com/huggingface/diffusers/issues/new?assignees=&labels=&template=feature_request.md&title=) to discuss your feature idea with us and whether it meets our criteria of being self-contained, easy-to-tweak, beginner-friendly, and single-purpose.
+Pipelines do not offer any training functionality. You'll notice PyTorch's autograd is disabled by decorating the [`~DiffusionPipeline.__call__`] method with a [`torch.no_grad`](https://pytorch.org/docs/stable/generated/torch.no_grad.html) decorator because pipelines should not be used for training. If you're interested in training, please take a look at the [Training](fort-obsidian/diffusers/docs/source/en/training/overview.md) guides instead!
 
-## Install
+</Tip>
 
-Make sure you can successfully run the latest versions of the example scripts by installing the library from source in a new virtual environment:
+The table below lists all the pipelines currently available in 🤗 Diffusers and the tasks they support. Click on a pipeline to view its abstract and published paper.
 
-```bash
-git clone https://github.com/huggingface/diffusers
-cd diffusers
-pip install .
-```
+| Pipeline | Tasks |
+|---|---|
+| [AltDiffusion](alt_diffusion) | image2image |
+| [AnimateDiff](animatediff.md) | text2video |
+| [Attend-and-Excite](attend_and_excite.md) | text2image |
+| [Audio Diffusion](audio_diffusion) | image2audio |
+| [AudioLDM](audioldm.md) | text2audio |
+| [AudioLDM2](audioldm2.md) | text2audio |
+| [BLIP Diffusion](blip_diffusion.md) | text2image |
+| [Consistency Models](consistency_models.md) | unconditional image generation |
+| [ControlNet](fort-obsidian/diffusers/docs/source/en/api/pipelines/controlnet.md) | text2image, image2image, inpainting |
+| [ControlNet with Stable Diffusion XL](controlnet_sdxl.md) | text2image |
+| [ControlNet-XS](controlnetxs.md) | text2image |
+| [ControlNet-XS with Stable Diffusion XL](controlnetxs_sdxl.md) | text2image |
+| [Cycle Diffusion](cycle_diffusion) | image2image |
+| [Dance Diffusion](dance_diffusion.md) | unconditional audio generation |
+| [DDIM](fort-obsidian/diffusers/docs/source/en/api/pipelines/ddim.md) | unconditional image generation |
+| [DDPM](fort-obsidian/diffusers/docs/source/en/api/pipelines/ddpm.md) | unconditional image generation |
+| [DeepFloyd IF](deepfloyd_if.md) | text2image, image2image, inpainting, super-resolution |
+| [DiffEdit](fort-obsidian/diffusers/docs/source/en/api/pipelines/diffedit.md) | inpainting |
+| [DiT](dit.md) | text2image |
+| [GLIGEN](gligen.md) | text2image |
+| [InstructPix2Pix](pix2pix.md) | image editing |
+| [Kandinsky 2.1](fort-obsidian/diffusers/docs/source/en/api/pipelines/kandinsky.md) | text2image, image2image, inpainting, interpolation |
+| [Kandinsky 2.2](kandinsky_v22.md) | text2image, image2image, inpainting |
+| [Kandinsky 3](kandinsky3.md) | text2image, image2image |
+| [Latent Consistency Models](latent_consistency_models.md) | text2image |
+| [Latent Diffusion](latent_diffusion.md) | text2image, super-resolution |
+| [LDM3D](ldm3d_diffusion.md) | text2image, text-to-3D, text-to-pano, upscaling |
+| [LEDITS++](ledits_pp.md) | image editing |
+| [MultiDiffusion](panorama.md) | text2image |
+| [MusicLDM](musicldm.md) | text2audio |
+| [Paint by Example](paint_by_example.md) | inpainting |
+| [ParaDiGMS](paradigms) | text2image |
+| [Pix2Pix Zero](pix2pix_zero) | image editing |
+| [PixArt-α](pixart.md) | text2image |
+| [PNDM](pndm.md) | unconditional image generation |
+| [RePaint](repaint.md) | inpainting |
+| [Score SDE VE](score_sde_ve.md) | unconditional image generation |
+| [Self-Attention Guidance](self_attention_guidance.md) | text2image |
+| [Semantic Guidance](semantic_stable_diffusion.md) | text2image |
+| [Shap-E](shap_e.md) | text-to-3D, image-to-3D |
+| [Spectrogram Diffusion](spectrogram_diffusion) |  |
+| [Stable Diffusion](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/overview.md) | text2image, image2image, depth2image, inpainting, image variation, latent upscaler, super-resolution |
+| [Stable Diffusion Model Editing](model_editing) | model editing |
+| [Stable Diffusion XL](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/stable_diffusion_xl.md) | text2image, image2image, inpainting |
+| [Stable Diffusion XL Turbo](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/sdxl_turbo.md) | text2image, image2image, inpainting |
+| [Stable unCLIP](stable_unclip.md) | text2image, image variation |
+| [Stochastic Karras VE](stochastic_karras_ve.md) | unconditional image generation |
+| [T2I-Adapter](adapter.md) | text2image |
+| [Text2Video](text_to_video.md) | text2video, video2video |
+| [Text2Video-Zero](text_to_video_zero.md) | text2video |
+| [unCLIP](unclip.md) | text2image, image variation |
+| [Unconditional Latent Diffusion](latent_diffusion_uncond) | unconditional image generation |
+| [UniDiffuser](unidiffuser.md) | text2image, image2text, image variation, text variation, unconditional image generation, unconditional audio generation |
+| [Value-guided planning](value_guided_sampling.md) | value guided sampling |
+| [Versatile Diffusion](versatile_diffusion) | text2image, image variation |
+| [VQ Diffusion](vq_diffusion.md) | text2image |
+| [Wuerstchen](fort-obsidian/diffusers/docs/source/en/api/pipelines/wuerstchen.md) | text2image |
 
-Then navigate to the folder of the training script (for example, [DreamBooth](https://github.com/huggingface/diffusers/tree/main/examples/dreambooth)) and install the `requirements.txt` file. Some training scripts have a specific requirement file for SDXL, LoRA or Flax. If you're using one of these scripts, make sure you install its corresponding requirements file.
+## DiffusionPipeline
 
-```bash
-cd examples/dreambooth
-pip install -r requirements.txt
-# to train SDXL with DreamBooth
-pip install -r requirements_sdxl.txt
-```
+[[autodoc]] DiffusionPipeline
+	- all
+	- __call__
+	- device
+	- to
+	- components
 
-To speedup training and reduce memory-usage, we recommend:
 
-- using PyTorch 2.0 or higher to automatically use [scaled dot product attention](fort-obsidian/diffusers/docs/source/en/optimization/torch2.0.md#scaled-dot-product-attention) during training (you don't need to make any changes to the training code)
-- installing [xFormers](fort-obsidian/diffusers/docs/source/en/optimization/xformers.md) to enable memory-efficient attention
+[[autodoc]] pipelines.StableDiffusionMixin.enable_freeu
+
+[[autodoc]] pipelines.StableDiffusionMixin.disable_freeu
+
+## FlaxDiffusionPipeline
+
+[[autodoc]] pipelines.pipeline_flax_utils.FlaxDiffusionPipeline
+
+## PushToHubMixin
+
+[[autodoc]] utils.PushToHubMixin

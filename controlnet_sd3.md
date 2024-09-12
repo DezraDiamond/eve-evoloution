@@ -1,4 +1,4 @@
-<!--Copyright 2024 The HuggingFace Team. All rights reserved.
+<!--Copyright 2023 The HuggingFace Team and The InstantX Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -10,7 +10,9 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# ControlNet
+# ControlNet with Stable Diffusion 3
+
+StableDiffusion3ControlNetPipeline is an implementation of ControlNet for Stable Diffusion 3.
 
 ControlNet was introduced in [Adding Conditional Control to Text-to-Image Diffusion Models](https://huggingface.co/papers/2302.05543) by Lvmin Zhang, Anyi Rao, and Maneesh Agrawala.
 
@@ -20,9 +22,7 @@ The abstract from the paper is:
 
 *We present ControlNet, a neural network architecture to add spatial conditioning controls to large, pretrained text-to-image diffusion models. ControlNet locks the production-ready large diffusion models, and reuses their deep and robust encoding layers pretrained with billions of images as a strong backbone to learn a diverse set of conditional controls. The neural architecture is connected with "zero convolutions" (zero-initialized convolution layers) that progressively grow the parameters from zero and ensure that no harmful noise could affect the finetuning. We test various conditioning controls, eg, edges, depth, segmentation, human pose, etc, with Stable Diffusion, using single or multiple conditions, with or without prompts. We show that the training of ControlNets is robust with small (<50k) and large (>1m) datasets. Extensive results show that ControlNet may facilitate wider applications to control image diffusion models.*
 
-This model was contributed by [takuma104](https://huggingface.co/takuma104). ❤️
-
-The original codebase can be found at [lllyasviel/ControlNet](https://github.com/lllyasviel/ControlNet), and you can find official ControlNet checkpoints on [lllyasviel's](https://huggingface.co/lllyasviel) Hub profile.
+This code is implemented by [The InstantX Team](https://huggingface.co/InstantX). You can find pre-trained checkpoints for SD3-ControlNet on [The InstantX Team](https://huggingface.co/InstantX) Hub profile.
 
 <Tip>
 
@@ -30,49 +30,10 @@ Make sure to check out the Schedulers [guide](fort-obsidian/diffusers/docs/sourc
 
 </Tip>
 
-## StableDiffusionControlNetPipeline
-[[autodoc]] StableDiffusionControlNetPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-
-## StableDiffusionControlNetImg2ImgPipeline
-[[autodoc]] StableDiffusionControlNetImg2ImgPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-
-## StableDiffusionControlNetInpaintPipeline
-[[autodoc]] StableDiffusionControlNetInpaintPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-
-## StableDiffusionPipelineOutput
-[[autodoc]] pipelines.stable_diffusion.StableDiffusionPipelineOutput
-
-## FlaxStableDiffusionControlNetPipeline
-[[autodoc]] FlaxStableDiffusionControlNetPipeline
+## StableDiffusion3ControlNetPipeline
+[[autodoc]] StableDiffusion3ControlNetPipeline
 	- all
 	- __call__
 
-## FlaxStableDiffusionControlNetPipelineOutput
-[[autodoc]] pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput
+## StableDiffusion3PipelineOutput
+[[autodoc]] pipelines.stable_diffusion_3.pipeline_output.StableDiffusion3PipelineOutput

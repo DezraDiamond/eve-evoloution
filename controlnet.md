@@ -10,69 +10,41 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# ControlNet
+# ControlNetModel
 
-ControlNet was introduced in [Adding Conditional Control to Text-to-Image Diffusion Models](https://huggingface.co/papers/2302.05543) by Lvmin Zhang, Anyi Rao, and Maneesh Agrawala.
-
-With a ControlNet model, you can provide an additional control image to condition and control Stable Diffusion generation. For example, if you provide a depth map, the ControlNet model generates an image that'll preserve the spatial information from the depth map. It is a more flexible and accurate way to control the image generation process.
+The ControlNet model was introduced in [Adding Conditional Control to Text-to-Image Diffusion Models](https://huggingface.co/papers/2302.05543) by Lvmin Zhang, Anyi Rao, Maneesh Agrawala. It provides a greater degree of control over text-to-image generation by conditioning the model on additional inputs such as edge maps, depth maps, segmentation maps, and keypoints for pose detection.
 
 The abstract from the paper is:
 
 *We present ControlNet, a neural network architecture to add spatial conditioning controls to large, pretrained text-to-image diffusion models. ControlNet locks the production-ready large diffusion models, and reuses their deep and robust encoding layers pretrained with billions of images as a strong backbone to learn a diverse set of conditional controls. The neural architecture is connected with "zero convolutions" (zero-initialized convolution layers) that progressively grow the parameters from zero and ensure that no harmful noise could affect the finetuning. We test various conditioning controls, eg, edges, depth, segmentation, human pose, etc, with Stable Diffusion, using single or multiple conditions, with or without prompts. We show that the training of ControlNets is robust with small (<50k) and large (>1m) datasets. Extensive results show that ControlNet may facilitate wider applications to control image diffusion models.*
 
-This model was contributed by [takuma104](https://huggingface.co/takuma104). ❤️
+## Loading from the original format
 
-The original codebase can be found at [lllyasviel/ControlNet](https://github.com/lllyasviel/ControlNet), and you can find official ControlNet checkpoints on [lllyasviel's](https://huggingface.co/lllyasviel) Hub profile.
+By default the [`ControlNetModel`] should be loaded with [`~ModelMixin.from_pretrained`], but it can also be loaded
+from the original format using [`FromOriginalModelMixin.from_single_file`] as follows:
 
-<Tip>
+```py
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
 
-Make sure to check out the Schedulers [guide](fort-obsidian/diffusers/docs/source/en/using-diffusers/schedulers.md) to learn how to explore the tradeoff between scheduler speed and quality, and see the [reuse components across pipelines](fort-obsidian/diffusers/docs/source/en/using-diffusers/loading.md#reuse-components-across-pipelines) section to learn how to efficiently load the same components into multiple pipelines.
+url = "https://huggingface.co/lllyasviel/ControlNet-v1-1/blob/main/control_v11p_sd15_canny.pth"  # can also be a local path
+controlnet = ControlNetModel.from_single_file(url)
 
-</Tip>
+url = "https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v1-5-pruned.safetensors"  # can also be a local path
+pipe = StableDiffusionControlNetPipeline.from_single_file(url, controlnet=controlnet)
+```
 
-## StableDiffusionControlNetPipeline
-[[autodoc]] StableDiffusionControlNetPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
+## ControlNetModel
 
-## StableDiffusionControlNetImg2ImgPipeline
-[[autodoc]] StableDiffusionControlNetImg2ImgPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
+[[autodoc]] ControlNetModel
 
-## StableDiffusionControlNetInpaintPipeline
-[[autodoc]] StableDiffusionControlNetInpaintPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_vae_slicing
-	- disable_vae_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
+## ControlNetOutput
 
-## StableDiffusionPipelineOutput
-[[autodoc]] pipelines.stable_diffusion.StableDiffusionPipelineOutput
+[[autodoc]] models.controlnet.ControlNetOutput
 
-## FlaxStableDiffusionControlNetPipeline
-[[autodoc]] FlaxStableDiffusionControlNetPipeline
-	- all
-	- __call__
+## FlaxControlNetModel
 
-## FlaxStableDiffusionControlNetPipelineOutput
-[[autodoc]] pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput
+[[autodoc]] FlaxControlNetModel
+
+## FlaxControlNetOutput
+
+[[autodoc]] models.controlnet_flax.FlaxControlNetOutput

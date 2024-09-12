@@ -10,30 +10,27 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Depth-to-image
+# Image variation
 
-The Stable Diffusion model can also infer depth based on an image using [MiDaS](https://github.com/isl-org/MiDaS). This allows you to pass a text prompt and an initial image to condition the generation of new images as well as a `depth_map` to preserve the image structure.
+The Stable Diffusion model can also generate variations from an input image. It uses a fine-tuned version of a Stable Diffusion model by [Justin Pinkney](https://www.justinpinkney.com/) from [Lambda](https://lambdalabs.com/).
+
+The original codebase can be found at [LambdaLabsML/lambda-diffusers](https://github.com/LambdaLabsML/lambda-diffusers#stable-diffusion-image-variations) and additional official checkpoints for image variation can be found at [lambdalabs/sd-image-variations-diffusers](https://huggingface.co/lambdalabs/sd-image-variations-diffusers).
 
 <Tip>
 
 Make sure to check out the Stable Diffusion [Tips](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/overview.md#tips) section to learn how to explore the tradeoff between scheduler speed and quality, and how to reuse pipeline components efficiently!
 
-If you're interested in using one of the official checkpoints for a task, explore the [CompVis](https://huggingface.co/CompVis), [Runway](https://huggingface.co/runwayml), and [Stability AI](https://huggingface.co/stabilityai) Hub organizations!
-
 </Tip>
 
-## StableDiffusionDepth2ImgPipeline
+## StableDiffusionImageVariationPipeline
 
-[[autodoc]] StableDiffusionDepth2ImgPipeline
+[[autodoc]] StableDiffusionImageVariationPipeline
 	- all
 	- __call__
 	- enable_attention_slicing
 	- disable_attention_slicing
 	- enable_xformers_memory_efficient_attention
 	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-	- load_lora_weights
-	- save_lora_weights
 
 ## StableDiffusionPipelineOutput
 

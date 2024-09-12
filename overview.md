@@ -10,101 +10,18 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Pipelines
+# Models
 
-Pipelines provide a simple way to run state-of-the-art diffusion models in inference by bundling all of the necessary components (multiple independently-trained models, schedulers, and processors) into a single end-to-end class. Pipelines are flexible and they can be adapted to use different schedulers or even model components.
+🤗 Diffusers provides pretrained models for popular algorithms and modules to create custom diffusion systems. The primary function of models is to denoise an input sample as modeled by the distribution  \\(p_{\theta}(x_{t-1}|x_{t})\\).
 
-All pipelines are built from the base [`DiffusionPipeline`] class which provides basic functionality for loading, downloading, and saving all the components. Specific pipeline types (for example [`StableDiffusionPipeline`]) loaded with [`~DiffusionPipeline.from_pretrained`] are automatically detected and the pipeline components are loaded and passed to the `__init__` function of the pipeline.
+All models are built from the base [`ModelMixin`] class which is a [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html) providing basic functionality for saving and loading models, locally and from the Hugging Face Hub.
 
-<Tip warning={true}>
+## ModelMixin
+[[autodoc]] ModelMixin
 
-You shouldn't use the [`DiffusionPipeline`] class for training. Individual components (for example, [`UNet2DModel`] and [`UNet2DConditionModel`]) of diffusion pipelines are usually trained individually, so we suggest directly working with them instead.
+## FlaxModelMixin
 
-<br>
-
-Pipelines do not offer any training functionality. You'll notice PyTorch's autograd is disabled by decorating the [`~DiffusionPipeline.__call__`] method with a [`torch.no_grad`](https://pytorch.org/docs/stable/generated/torch.no_grad.html) decorator because pipelines should not be used for training. If you're interested in training, please take a look at the [Training](fort-obsidian/diffusers/docs/source/en/training/overview.md) guides instead!
-
-</Tip>
-
-The table below lists all the pipelines currently available in 🤗 Diffusers and the tasks they support. Click on a pipeline to view its abstract and published paper.
-
-| Pipeline | Tasks |
-|---|---|
-| [AltDiffusion](alt_diffusion) | image2image |
-| [AnimateDiff](animatediff.md) | text2video |
-| [Attend-and-Excite](attend_and_excite.md) | text2image |
-| [Audio Diffusion](audio_diffusion) | image2audio |
-| [AudioLDM](audioldm.md) | text2audio |
-| [AudioLDM2](audioldm2.md) | text2audio |
-| [BLIP Diffusion](blip_diffusion.md) | text2image |
-| [Consistency Models](consistency_models.md) | unconditional image generation |
-| [ControlNet](fort-obsidian/diffusers/docs/source/en/api/pipelines/controlnet.md) | text2image, image2image, inpainting |
-| [ControlNet with Stable Diffusion XL](controlnet_sdxl.md) | text2image |
-| [ControlNet-XS](controlnetxs.md) | text2image |
-| [ControlNet-XS with Stable Diffusion XL](controlnetxs_sdxl.md) | text2image |
-| [Cycle Diffusion](cycle_diffusion) | image2image |
-| [Dance Diffusion](dance_diffusion.md) | unconditional audio generation |
-| [DDIM](fort-obsidian/diffusers/docs/source/en/api/pipelines/ddim.md) | unconditional image generation |
-| [DDPM](fort-obsidian/diffusers/docs/source/en/api/pipelines/ddpm.md) | unconditional image generation |
-| [DeepFloyd IF](deepfloyd_if.md) | text2image, image2image, inpainting, super-resolution |
-| [DiffEdit](fort-obsidian/diffusers/docs/source/en/api/pipelines/diffedit.md) | inpainting |
-| [DiT](dit.md) | text2image |
-| [GLIGEN](gligen.md) | text2image |
-| [InstructPix2Pix](pix2pix.md) | image editing |
-| [Kandinsky 2.1](fort-obsidian/diffusers/docs/source/en/api/pipelines/kandinsky.md) | text2image, image2image, inpainting, interpolation |
-| [Kandinsky 2.2](kandinsky_v22.md) | text2image, image2image, inpainting |
-| [Kandinsky 3](kandinsky3.md) | text2image, image2image |
-| [Latent Consistency Models](latent_consistency_models.md) | text2image |
-| [Latent Diffusion](latent_diffusion.md) | text2image, super-resolution |
-| [LDM3D](ldm3d_diffusion.md) | text2image, text-to-3D, text-to-pano, upscaling |
-| [LEDITS++](ledits_pp.md) | image editing |
-| [MultiDiffusion](panorama.md) | text2image |
-| [MusicLDM](musicldm.md) | text2audio |
-| [Paint by Example](paint_by_example.md) | inpainting |
-| [ParaDiGMS](paradigms) | text2image |
-| [Pix2Pix Zero](pix2pix_zero) | image editing |
-| [PixArt-α](pixart.md) | text2image |
-| [PNDM](pndm.md) | unconditional image generation |
-| [RePaint](repaint.md) | inpainting |
-| [Score SDE VE](score_sde_ve.md) | unconditional image generation |
-| [Self-Attention Guidance](self_attention_guidance.md) | text2image |
-| [Semantic Guidance](semantic_stable_diffusion.md) | text2image |
-| [Shap-E](shap_e.md) | text-to-3D, image-to-3D |
-| [Spectrogram Diffusion](spectrogram_diffusion) |  |
-| [Stable Diffusion](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/overview.md) | text2image, image2image, depth2image, inpainting, image variation, latent upscaler, super-resolution |
-| [Stable Diffusion Model Editing](model_editing) | model editing |
-| [Stable Diffusion XL](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/stable_diffusion_xl.md) | text2image, image2image, inpainting |
-| [Stable Diffusion XL Turbo](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/sdxl_turbo.md) | text2image, image2image, inpainting |
-| [Stable unCLIP](stable_unclip.md) | text2image, image variation |
-| [Stochastic Karras VE](stochastic_karras_ve.md) | unconditional image generation |
-| [T2I-Adapter](adapter.md) | text2image |
-| [Text2Video](text_to_video.md) | text2video, video2video |
-| [Text2Video-Zero](text_to_video_zero.md) | text2video |
-| [unCLIP](unclip.md) | text2image, image variation |
-| [Unconditional Latent Diffusion](latent_diffusion_uncond) | unconditional image generation |
-| [UniDiffuser](unidiffuser.md) | text2image, image2text, image variation, text variation, unconditional image generation, unconditional audio generation |
-| [Value-guided planning](value_guided_sampling.md) | value guided sampling |
-| [Versatile Diffusion](versatile_diffusion) | text2image, image variation |
-| [VQ Diffusion](vq_diffusion.md) | text2image |
-| [Wuerstchen](fort-obsidian/diffusers/docs/source/en/api/pipelines/wuerstchen.md) | text2image |
-
-## DiffusionPipeline
-
-[[autodoc]] DiffusionPipeline
-	- all
-	- __call__
-	- device
-	- to
-	- components
-
-
-[[autodoc]] pipelines.StableDiffusionMixin.enable_freeu
-
-[[autodoc]] pipelines.StableDiffusionMixin.disable_freeu
-
-## FlaxDiffusionPipeline
-
-[[autodoc]] pipelines.pipeline_flax_utils.FlaxDiffusionPipeline
+[[autodoc]] FlaxModelMixin
 
 ## PushToHubMixin
 

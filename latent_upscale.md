@@ -10,16 +10,9 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Inpainting
+# Latent upscaler
 
-The Stable Diffusion model can also be applied to inpainting which lets you edit specific parts of an image by providing a mask and a text prompt using Stable Diffusion.
-
-## Tips
-
-It is recommended to use this pipeline with checkpoints that have been specifically fine-tuned for inpainting, such
-as [runwayml/stable-diffusion-inpainting](https://huggingface.co/runwayml/stable-diffusion-inpainting). Default
-text-to-image Stable Diffusion checkpoints, such as
-[runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) are also compatible but they might be less performant.
+The Stable Diffusion latent upscaler model was created by [Katherine Crowson](https://github.com/crowsonkb/k-diffusion) in collaboration with [Stability AI](https://stability.ai/). It is used to enhance the output image resolution by a factor of 2 (see this demo [notebook](https://colab.research.google.com/drive/1o1qYJcFeywzCIdkfKJy7cTpgZTCM2EI4) for a demonstration of the original implementation).
 
 <Tip>
 
@@ -29,29 +22,17 @@ If you're interested in using one of the official checkpoints for a task, explor
 
 </Tip>
 
-## StableDiffusionInpaintPipeline
+## StableDiffusionLatentUpscalePipeline
 
-[[autodoc]] StableDiffusionInpaintPipeline
+[[autodoc]] StableDiffusionLatentUpscalePipeline
 	- all
 	- __call__
+	- enable_sequential_cpu_offload
 	- enable_attention_slicing
 	- disable_attention_slicing
 	- enable_xformers_memory_efficient_attention
 	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-	- load_lora_weights
-	- save_lora_weights
 
 ## StableDiffusionPipelineOutput
 
 [[autodoc]] pipelines.stable_diffusion.StableDiffusionPipelineOutput
-
-## FlaxStableDiffusionInpaintPipeline
-
-[[autodoc]] FlaxStableDiffusionInpaintPipeline
-	- all
-	- __call__
-
-## FlaxStableDiffusionPipelineOutput
-
-[[autodoc]] pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput

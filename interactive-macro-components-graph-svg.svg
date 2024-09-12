@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+    <style>
+        .macro-component { cursor: pointer; }
+        .detail-view { display: none; }
+        .detail-background { cursor: pointer; }
+    </style>
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#999"/>
+        </marker>
+    </defs>
+
+    <!-- Main Graph -->
+    <g id="main-graph">
+        <g class="macro-component" id="macro1" transform="translate(100,100)">
+            <rect width="150" height="80" rx="10" ry="10" fill="#3498db"/>
+            <text x="75" y="45" text-anchor="middle" fill="white">Data Processing</text>
+        </g>
+
+        <g class="macro-component" id="macro2" transform="translate(400,100)">
+            <rect width="150" height="80" rx="10" ry="10" fill="#e74c3c"/>
+            <text x="75" y="45" text-anchor="middle" fill="white">Analysis Engine</text>
+        </g>
+
+        <g class="macro-component" id="macro3" transform="translate(250,250)">
+            <rect width="150" height="80" rx="10" ry="10" fill="#2ecc71"/>
+            <text x="75" y="45" text-anchor="middle" fill="white">Output Generation</text>
+        </g>
+
+        <path d="M250,140 H400" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <path d="M475,180 Q475,250 400,250" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <path d="M175,180 Q175,250 250,250" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+    </g>
+
+    <!-- Detailed Views -->
+    <g class="detail-view" id="detail-macro1">
+        <rect class="detail-background" x="0" y="0" width="800" height="400" fill="#f8f9fa" opacity="0.8"/>
+        <rect x="50" y="50" width="700" height="300" fill="#fff" stroke="#333" stroke-width="2"/>
+        <text x="400" y="80" text-anchor="middle" font-size="20">Data Processing Details</text>
+        <g transform="translate(100,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#3498db"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Input</text>
+        </g>
+        <g transform="translate(350,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#3498db"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Clean</text>
+        </g>
+        <g transform="translate(600,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#3498db"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Transform</text>
+        </g>
+        <path d="M200,145 H350" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <path d="M450,145 H600" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+    </g>
+
+    <g class="detail-view" id="detail-macro2">
+        <rect class="detail-background" x="0" y="0" width="800" height="400" fill="#f8f9fa" opacity="0.8"/>
+        <rect x="50" y="50" width="700" height="300" fill="#fff" stroke="#333" stroke-width="2"/>
+        <text x="400" y="80" text-anchor="middle" font-size="20">Analysis Engine Details</text>
+        <g transform="translate(100,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#e74c3c"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Model A</text>
+        </g>
+        <g transform="translate(350,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#e74c3c"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Model B</text>
+        </g>
+        <g transform="translate(600,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#e74c3c"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Aggregate</text>
+        </g>
+        <path d="M200,145 H350" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <path d="M450,145 H600" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+    </g>
+
+    <g class="detail-view" id="detail-macro3">
+        <rect class="detail-background" x="0" y="0" width="800" height="400" fill="#f8f9fa" opacity="0.8"/>
+        <rect x="50" y="50" width="700" height="300" fill="#fff" stroke="#333" stroke-width="2"/>
+        <text x="400" y="80" text-anchor="middle" font-size="20">Output Generation Details</text>
+        <g transform="translate(100,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#2ecc71"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Format</text>
+        </g>
+        <g transform="translate(350,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#2ecc71"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Validate</text>
+        </g>
+        <g transform="translate(600,120)">
+            <rect width="100" height="50" rx="5" ry="5" fill="#2ecc71"/>
+            <text x="50" y="30" text-anchor="middle" fill="white">Deliver</text>
+        </g>
+        <path d="M200,145 H350" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <path d="M450,145 H600" fill="none" stroke="#999" stroke-width="2" marker-end="url(#arrowhead)"/>
+    </g>
+</svg>

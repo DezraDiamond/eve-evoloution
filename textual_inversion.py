@@ -1,4 +1,6 @@
-# Copyright 2024 The HuggingFace Team. All rights reserved.
+#!/usr/bin/env python
+# coding=utf-8
+# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -10,574 +12,947 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.
-from typing import Dict, List, Optional, Union
 
-import safetensors
+import argparse
+import logging
+import math
+import os
+import random
+import warnings
+from pathlib import Path
+
+import numpy as np
+import PIL
 import torch
-from huggingface_hub.utils import validate_hf_hub_args
-from torch import nn
+import torch.nn.functional as F
+import torch.utils.checkpoint
+import transformers
+from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import ProjectConfiguration, set_seed
+from huggingface_hub import create_repo, upload_folder
+from onnxruntime.training.optim.fp16_optimizer import FP16_Optimizer as ORT_FP16_Optimizer
+from onnxruntime.training.ortmodule import ORTModule
 
-from ..models.modeling_utils import load_state_dict
-from ..utils import _get_model_file, is_accelerate_available, is_transformers_available, logging
+# TODO: remove and import from diffusers.utils when the new version of diffusers is released
+from packaging import version
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
+from tqdm.auto import tqdm
+from transformers import CLIPTextModel, CLIPTokenizer
+
+import diffusers
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    DiffusionPipeline,
+    DPMSolverMultistepScheduler,
+    StableDiffusionPipeline,
+    UNet2DConditionModel,
+)
+from diffusers.optimization import get_scheduler
+from diffusers.utils import check_min_version, is_wandb_available
+from diffusers.utils.import_utils import is_xformers_available
 
 
-if is_transformers_available():
-    from transformers import PreTrainedModel, PreTrainedTokenizer
+if is_wandb_available():
+    import wandb
 
-if is_accelerate_available():
-    from accelerate.hooks import AlignDevicesHook, CpuOffload, remove_hook_from_module
-
-logger = logging.get_logger(__name__)
-
-TEXT_INVERSION_NAME = "learned_embeds.bin"
-TEXT_INVERSION_NAME_SAFE = "learned_embeds.safetensors"
-
-
-@validate_hf_hub_args
-def load_textual_inversion_state_dicts(pretrained_model_name_or_paths, **kwargs):
-    cache_dir = kwargs.pop("cache_dir", None)
-    force_download = kwargs.pop("force_download", False)
-    resume_download = kwargs.pop("resume_download", None)
-    proxies = kwargs.pop("proxies", None)
-    local_files_only = kwargs.pop("local_files_only", None)
-    token = kwargs.pop("token", None)
-    revision = kwargs.pop("revision", None)
-    subfolder = kwargs.pop("subfolder", None)
-    weight_name = kwargs.pop("weight_name", None)
-    use_safetensors = kwargs.pop("use_safetensors", None)
-
-    allow_pickle = False
-    if use_safetensors is None:
-        use_safetensors = True
-        allow_pickle = True
-
-    user_agent = {
-        "file_type": "text_inversion",
-        "framework": "pytorch",
+if version.parse(version.parse(PIL.__version__).base_version) >= version.parse("9.1.0"):
+    PIL_INTERPOLATION = {
+        "linear": PIL.Image.Resampling.BILINEAR,
+        "bilinear": PIL.Image.Resampling.BILINEAR,
+        "bicubic": PIL.Image.Resampling.BICUBIC,
+        "lanczos": PIL.Image.Resampling.LANCZOS,
+        "nearest": PIL.Image.Resampling.NEAREST,
     }
-    state_dicts = []
-    for pretrained_model_name_or_path in pretrained_model_name_or_paths:
-        if not isinstance(pretrained_model_name_or_path, (dict, torch.Tensor)):
-            # 3.1. Load textual inversion file
-            model_file = None
-
-            # Let's first try to load .safetensors weights
-            if (use_safetensors and weight_name is None) or (
-                weight_name is not None and weight_name.endswith(".safetensors")
-            ):
-                try:
-                    model_file = _get_model_file(
-                        pretrained_model_name_or_path,
-                        weights_name=weight_name or TEXT_INVERSION_NAME_SAFE,
-                        cache_dir=cache_dir,
-                        force_download=force_download,
-                        resume_download=resume_download,
-                        proxies=proxies,
-                        local_files_only=local_files_only,
-                        token=token,
-                        revision=revision,
-                        subfolder=subfolder,
-                        user_agent=user_agent,
-                    )
-                    state_dict = safetensors.torch.load_file(model_file, device="cpu")
-                except Exception as e:
-                    if not allow_pickle:
-                        raise e
-
-                    model_file = None
-
-            if model_file is None:
-                model_file = _get_model_file(
-                    pretrained_model_name_or_path,
-                    weights_name=weight_name or TEXT_INVERSION_NAME,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                    resume_download=resume_download,
-                    proxies=proxies,
-                    local_files_only=local_files_only,
-                    token=token,
-                    revision=revision,
-                    subfolder=subfolder,
-                    user_agent=user_agent,
-                )
-                state_dict = load_state_dict(model_file)
-        else:
-            state_dict = pretrained_model_name_or_path
-
-        state_dicts.append(state_dict)
-
-    return state_dicts
+else:
+    PIL_INTERPOLATION = {
+        "linear": PIL.Image.LINEAR,
+        "bilinear": PIL.Image.BILINEAR,
+        "bicubic": PIL.Image.BICUBIC,
+        "lanczos": PIL.Image.LANCZOS,
+        "nearest": PIL.Image.NEAREST,
+    }
+# ------------------------------------------------------------------------------
 
 
-class TextualInversionLoaderMixin:
-    r"""
-    Load Textual Inversion tokens and embeddings to the tokenizer and text encoder.
+# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
+check_min_version("0.17.0.dev0")
+
+logger = get_logger(__name__)
+
+
+def save_model_card(repo_id: str, images=None, base_model=str, repo_folder=None):
+    img_str = ""
+    for i, image in enumerate(images):
+        image.save(os.path.join(repo_folder, f"image_{i}.png"))
+        img_str += f"![img_{i}](./image_{i}.png)\n"
+
+    yaml = f"""
+---
+license: creativeml-openrail-m
+base_model: {base_model}
+tags:
+- stable-diffusion
+- stable-diffusion-diffusers
+- text-to-image
+- diffusers
+- textual_inversion
+- diffusers-training
+- onxruntime
+inference: true
+---
     """
+    model_card = f"""
+# Textual inversion text2image fine-tuning - {repo_id}
+These are textual inversion adaption weights for {base_model}. You can find some example images in the following. \n
+{img_str}
+"""
+    with open(os.path.join(repo_folder, "README.md"), "w") as f:
+        f.write(yaml + model_card)
 
-    def maybe_convert_prompt(self, prompt: Union[str, List[str]], tokenizer: "PreTrainedTokenizer"):  # noqa: F821
-        r"""
-        Processes prompts that include a special token corresponding to a multi-vector textual inversion embedding to
-        be replaced with multiple special tokens each corresponding to one of the vectors. If the prompt has no textual
-        inversion token or if the textual inversion token is a single vector, the input prompt is returned.
 
-        Parameters:
-            prompt (`str` or list of `str`):
-                The prompt or prompts to guide the image generation.
-            tokenizer (`PreTrainedTokenizer`):
-                The tokenizer responsible for encoding the prompt into input tokens.
+def log_validation(text_encoder, tokenizer, unet, vae, args, accelerator, weight_dtype, epoch):
+    logger.info(
+        f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
+        f" {args.validation_prompt}."
+    )
+    # create pipeline (note: unet and vae are loaded again in float32)
+    pipeline = DiffusionPipeline.from_pretrained(
+        args.pretrained_model_name_or_path,
+        text_encoder=accelerator.unwrap_model(text_encoder),
+        tokenizer=tokenizer,
+        unet=unet,
+        vae=vae,
+        safety_checker=None,
+        revision=args.revision,
+        torch_dtype=weight_dtype,
+    )
+    pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+    pipeline = pipeline.to(accelerator.device)
+    pipeline.set_progress_bar_config(disable=True)
 
-        Returns:
-            `str` or list of `str`: The converted prompt
-        """
-        if not isinstance(prompt, List):
-            prompts = [prompt]
-        else:
-            prompts = prompt
+    # run inference
+    generator = None if args.seed is None else torch.Generator(device=accelerator.device).manual_seed(args.seed)
+    images = []
+    for _ in range(args.num_validation_images):
+        with torch.autocast("cuda"):
+            image = pipeline(args.validation_prompt, num_inference_steps=25, generator=generator).images[0]
+        images.append(image)
 
-        prompts = [self._maybe_convert_prompt(p, tokenizer) for p in prompts]
-
-        if not isinstance(prompt, List):
-            return prompts[0]
-
-        return prompts
-
-    def _maybe_convert_prompt(self, prompt: str, tokenizer: "PreTrainedTokenizer"):  # noqa: F821
-        r"""
-        Maybe convert a prompt into a "multi vector"-compatible prompt. If the prompt includes a token that corresponds
-        to a multi-vector textual inversion embedding, this function will process the prompt so that the special token
-        is replaced with multiple special tokens each corresponding to one of the vectors. If the prompt has no textual
-        inversion token or a textual inversion token that is a single vector, the input prompt is simply returned.
-
-        Parameters:
-            prompt (`str`):
-                The prompt to guide the image generation.
-            tokenizer (`PreTrainedTokenizer`):
-                The tokenizer responsible for encoding the prompt into input tokens.
-
-        Returns:
-            `str`: The converted prompt
-        """
-        tokens = tokenizer.tokenize(prompt)
-        unique_tokens = set(tokens)
-        for token in unique_tokens:
-            if token in tokenizer.added_tokens_encoder:
-                replacement = token
-                i = 1
-                while f"{token}_{i}" in tokenizer.added_tokens_encoder:
-                    replacement += f" {token}_{i}"
-                    i += 1
-
-                prompt = prompt.replace(token, replacement)
-
-        return prompt
-
-    def _check_text_inv_inputs(self, tokenizer, text_encoder, pretrained_model_name_or_paths, tokens):
-        if tokenizer is None:
-            raise ValueError(
-                f"{self.__class__.__name__} requires `self.tokenizer` or passing a `tokenizer` of type `PreTrainedTokenizer` for calling"
-                f" `{self.load_textual_inversion.__name__}`"
+    for tracker in accelerator.trackers:
+        if tracker.name == "tensorboard":
+            np_images = np.stack([np.asarray(img) for img in images])
+            tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+        if tracker.name == "wandb":
+            tracker.log(
+                {
+                    "validation": [
+                        wandb.Image(image, caption=f"{i}: {args.validation_prompt}") for i, image in enumerate(images)
+                    ]
+                }
             )
 
-        if text_encoder is None:
-            raise ValueError(
-                f"{self.__class__.__name__} requires `self.text_encoder` or passing a `text_encoder` of type `PreTrainedModel` for calling"
-                f" `{self.load_textual_inversion.__name__}`"
-            )
+    del pipeline
+    torch.cuda.empty_cache()
+    return images
 
-        if len(pretrained_model_name_or_paths) > 1 and len(pretrained_model_name_or_paths) != len(tokens):
-            raise ValueError(
-                f"You have passed a list of models of length {len(pretrained_model_name_or_paths)}, and list of tokens of length {len(tokens)} "
-                f"Make sure both lists have the same length."
-            )
 
-        valid_tokens = [t for t in tokens if t is not None]
-        if len(set(valid_tokens)) < len(valid_tokens):
-            raise ValueError(f"You have passed a list of tokens that contains duplicates: {tokens}")
+def save_progress(text_encoder, placeholder_token_ids, accelerator, args, save_path):
+    logger.info("Saving embeddings")
+    learned_embeds = (
+        accelerator.unwrap_model(text_encoder)
+        .get_input_embeddings()
+        .weight[min(placeholder_token_ids) : max(placeholder_token_ids) + 1]
+    )
+    learned_embeds_dict = {args.placeholder_token: learned_embeds.detach().cpu()}
+    torch.save(learned_embeds_dict, save_path)
 
-    @staticmethod
-    def _retrieve_tokens_and_embeddings(tokens, state_dicts, tokenizer):
-        all_tokens = []
-        all_embeddings = []
-        for state_dict, token in zip(state_dicts, tokens):
-            if isinstance(state_dict, torch.Tensor):
-                if token is None:
-                    raise ValueError(
-                        "You are trying to load a textual inversion embedding that has been saved as a PyTorch tensor. Make sure to pass the name of the corresponding token in this case: `token=...`."
-                    )
-                loaded_token = token
-                embedding = state_dict
-            elif len(state_dict) == 1:
-                # diffusers
-                loaded_token, embedding = next(iter(state_dict.items()))
-            elif "string_to_param" in state_dict:
-                # A1111
-                loaded_token = state_dict["name"]
-                embedding = state_dict["string_to_param"]["*"]
-            else:
-                raise ValueError(
-                    f"Loaded state dictionary is incorrect: {state_dict}. \n\n"
-                    "Please verify that the loaded state dictionary of the textual embedding either only has a single key or includes the `string_to_param`"
-                    " input key."
-                )
 
-            if token is not None and loaded_token != token:
-                logger.info(f"The loaded token: {loaded_token} is overwritten by the passed token {token}.")
-            else:
-                token = loaded_token
+def parse_args():
+    parser = argparse.ArgumentParser(description="Simple example of a training script.")
+    parser.add_argument(
+        "--save_steps",
+        type=int,
+        default=500,
+        help="Save learned_embeds.bin every X updates steps.",
+    )
+    parser.add_argument(
+        "--save_as_full_pipeline",
+        action="store_true",
+        help="Save the complete stable diffusion pipeline.",
+    )
+    parser.add_argument(
+        "--num_vectors",
+        type=int,
+        default=1,
+        help="How many textual inversion vectors shall be used to learn the concept.",
+    )
+    parser.add_argument(
+        "--pretrained_model_name_or_path",
+        type=str,
+        default=None,
+        required=True,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        required=False,
+        help="Revision of pretrained model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default=None,
+        help="Pretrained tokenizer name or path if not the same as model_name",
+    )
+    parser.add_argument(
+        "--train_data_dir", type=str, default=None, required=True, help="A folder containing the training data."
+    )
+    parser.add_argument(
+        "--placeholder_token",
+        type=str,
+        default=None,
+        required=True,
+        help="A token to use as a placeholder for the concept.",
+    )
+    parser.add_argument(
+        "--initializer_token", type=str, default=None, required=True, help="A token to use as initializer word."
+    )
+    parser.add_argument("--learnable_property", type=str, default="object", help="Choose between 'object' and 'style'")
+    parser.add_argument("--repeats", type=int, default=100, help="How many times to repeat the training data.")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="text-inversion-model",
+        help="The output directory where the model predictions and checkpoints will be written.",
+    )
+    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        default=512,
+        help=(
+            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
+            " resolution"
+        ),
+    )
+    parser.add_argument(
+        "--center_crop", action="store_true", help="Whether to center crop images before resizing to resolution."
+    )
+    parser.add_argument(
+        "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
+    )
+    parser.add_argument("--num_train_epochs", type=int, default=100)
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=5000,
+        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
+    )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of updates steps to accumulate before performing a backward/update pass.",
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-4,
+        help="Initial learning rate (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
+        "--scale_lr",
+        action="store_true",
+        default=False,
+        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+    )
+    parser.add_argument(
+        "--lr_scheduler",
+        type=str,
+        default="constant",
+        help=(
+            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
+            ' "constant", "constant_with_warmup"]'
+        ),
+    )
+    parser.add_argument(
+        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
+    )
+    parser.add_argument(
+        "--dataloader_num_workers",
+        type=int,
+        default=0,
+        help=(
+            "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
+        ),
+    )
+    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
+    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
+    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
+    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
+    parser.add_argument(
+        "--hub_model_id",
+        type=str,
+        default=None,
+        help="The name of the repository to keep in sync with the local `output_dir`.",
+    )
+    parser.add_argument(
+        "--logging_dir",
+        type=str,
+        default="logs",
+        help=(
+            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
+            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
+        ),
+    )
+    parser.add_argument(
+        "--mixed_precision",
+        type=str,
+        default="no",
+        choices=["no", "fp16", "bf16"],
+        help=(
+            "Whether to use mixed precision. Choose"
+            "between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10."
+            "and an Nvidia Ampere GPU."
+        ),
+    )
+    parser.add_argument(
+        "--allow_tf32",
+        action="store_true",
+        help=(
+            "Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
+            " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
+        ),
+    )
+    parser.add_argument(
+        "--report_to",
+        type=str,
+        default="tensorboard",
+        help=(
+            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
+        ),
+    )
+    parser.add_argument(
+        "--validation_prompt",
+        type=str,
+        default=None,
+        help="A prompt that is used during validation to verify that the model is learning.",
+    )
+    parser.add_argument(
+        "--num_validation_images",
+        type=int,
+        default=4,
+        help="Number of images that should be generated during validation with `validation_prompt`.",
+    )
+    parser.add_argument(
+        "--validation_steps",
+        type=int,
+        default=100,
+        help=(
+            "Run validation every X steps. Validation consists of running the prompt"
+            " `args.validation_prompt` multiple times: `args.num_validation_images`"
+            " and logging the images."
+        ),
+    )
+    parser.add_argument(
+        "--validation_epochs",
+        type=int,
+        default=None,
+        help=(
+            "Deprecated in favor of validation_steps. Run validation every X epochs. Validation consists of running the prompt"
+            " `args.validation_prompt` multiple times: `args.num_validation_images`"
+            " and logging the images."
+        ),
+    )
+    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument(
+        "--checkpointing_steps",
+        type=int,
+        default=500,
+        help=(
+            "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
+            " training using `--resume_from_checkpoint`."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoints_total_limit",
+        type=int,
+        default=None,
+        help=(
+            "Max number of checkpoints to store. Passed as `total_limit` to the `Accelerator` `ProjectConfiguration`."
+            " See Accelerator::save_state https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.save_state"
+            " for more docs"
+        ),
+    )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Whether training should be resumed from a previous checkpoint. Use a path saved by"
+            ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
+        ),
+    )
+    parser.add_argument(
+        "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
+    )
 
-            if token in tokenizer.get_vocab():
-                raise ValueError(
-                    f"Token {token} already in tokenizer vocabulary. Please choose a different token name or remove {token} and embedding from the tokenizer and text encoder."
-                )
+    args = parser.parse_args()
+    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    if env_local_rank != -1 and env_local_rank != args.local_rank:
+        args.local_rank = env_local_rank
 
-            all_tokens.append(token)
-            all_embeddings.append(embedding)
+    if args.train_data_dir is None:
+        raise ValueError("You must specify a train data directory.")
 
-        return all_tokens, all_embeddings
+    return args
 
-    @staticmethod
-    def _extend_tokens_and_embeddings(tokens, embeddings, tokenizer):
-        all_tokens = []
-        all_embeddings = []
 
-        for embedding, token in zip(embeddings, tokens):
-            if f"{token}_1" in tokenizer.get_vocab():
-                multi_vector_tokens = [token]
-                i = 1
-                while f"{token}_{i}" in tokenizer.added_tokens_encoder:
-                    multi_vector_tokens.append(f"{token}_{i}")
-                    i += 1
+imagenet_templates_small = [
+    "a photo of a {}",
+    "a rendering of a {}",
+    "a cropped photo of the {}",
+    "the photo of a {}",
+    "a photo of a clean {}",
+    "a photo of a dirty {}",
+    "a dark photo of the {}",
+    "a photo of my {}",
+    "a photo of the cool {}",
+    "a close-up photo of a {}",
+    "a bright photo of the {}",
+    "a cropped photo of a {}",
+    "a photo of the {}",
+    "a good photo of the {}",
+    "a photo of one {}",
+    "a close-up photo of the {}",
+    "a rendition of the {}",
+    "a photo of the clean {}",
+    "a rendition of a {}",
+    "a photo of a nice {}",
+    "a good photo of a {}",
+    "a photo of the nice {}",
+    "a photo of the small {}",
+    "a photo of the weird {}",
+    "a photo of the large {}",
+    "a photo of a cool {}",
+    "a photo of a small {}",
+]
 
-                raise ValueError(
-                    f"Multi-vector Token {multi_vector_tokens} already in tokenizer vocabulary. Please choose a different token name or remove the {multi_vector_tokens} and embedding from the tokenizer and text encoder."
-                )
+imagenet_style_templates_small = [
+    "a painting in the style of {}",
+    "a rendering in the style of {}",
+    "a cropped painting in the style of {}",
+    "the painting in the style of {}",
+    "a clean painting in the style of {}",
+    "a dirty painting in the style of {}",
+    "a dark painting in the style of {}",
+    "a picture in the style of {}",
+    "a cool painting in the style of {}",
+    "a close-up painting in the style of {}",
+    "a bright painting in the style of {}",
+    "a cropped painting in the style of {}",
+    "a good painting in the style of {}",
+    "a close-up painting in the style of {}",
+    "a rendition in the style of {}",
+    "a nice painting in the style of {}",
+    "a small painting in the style of {}",
+    "a weird painting in the style of {}",
+    "a large painting in the style of {}",
+]
 
-            is_multi_vector = len(embedding.shape) > 1 and embedding.shape[0] > 1
-            if is_multi_vector:
-                all_tokens += [token] + [f"{token}_{i}" for i in range(1, embedding.shape[0])]
-                all_embeddings += [e for e in embedding]  # noqa: C416
-            else:
-                all_tokens += [token]
-                all_embeddings += [embedding[0]] if len(embedding.shape) > 1 else [embedding]
 
-        return all_tokens, all_embeddings
-
-    @validate_hf_hub_args
-    def load_textual_inversion(
+class TextualInversionDataset(Dataset):
+    def __init__(
         self,
-        pretrained_model_name_or_path: Union[str, List[str], Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]],
-        token: Optional[Union[str, List[str]]] = None,
-        tokenizer: Optional["PreTrainedTokenizer"] = None,  # noqa: F821
-        text_encoder: Optional["PreTrainedModel"] = None,  # noqa: F821
-        **kwargs,
+        data_root,
+        tokenizer,
+        learnable_property="object",  # [object, style]
+        size=512,
+        repeats=100,
+        interpolation="bicubic",
+        flip_p=0.5,
+        set="train",
+        placeholder_token="*",
+        center_crop=False,
     ):
-        r"""
-        Load Textual Inversion embeddings into the text encoder of [`StableDiffusionPipeline`] (both 🤗 Diffusers and
-        Automatic1111 formats are supported).
+        self.data_root = data_root
+        self.tokenizer = tokenizer
+        self.learnable_property = learnable_property
+        self.size = size
+        self.placeholder_token = placeholder_token
+        self.center_crop = center_crop
+        self.flip_p = flip_p
 
-        Parameters:
-            pretrained_model_name_or_path (`str` or `os.PathLike` or `List[str or os.PathLike]` or `Dict` or `List[Dict]`):
-                Can be either one of the following or a list of them:
+        self.image_paths = [os.path.join(self.data_root, file_path) for file_path in os.listdir(self.data_root)]
 
-                    - A string, the *model id* (for example `sd-concepts-library/low-poly-hd-logos-icons`) of a
-                      pretrained model hosted on the Hub.
-                    - A path to a *directory* (for example `./my_text_inversion_directory/`) containing the textual
-                      inversion weights.
-                    - A path to a *file* (for example `./my_text_inversions.pt`) containing textual inversion weights.
-                    - A [torch state
-                      dict](https://pytorch.org/tutorials/beginner/saving_loading_models.html#what-is-a-state-dict).
+        self.num_images = len(self.image_paths)
+        self._length = self.num_images
 
-            token (`str` or `List[str]`, *optional*):
-                Override the token to use for the textual inversion weights. If `pretrained_model_name_or_path` is a
-                list, then `token` must also be a list of equal length.
-            text_encoder ([`~transformers.CLIPTextModel`], *optional*):
-                Frozen text-encoder ([clip-vit-large-patch14](https://huggingface.co/openai/clip-vit-large-patch14)).
-                If not specified, function will take self.tokenizer.
-            tokenizer ([`~transformers.CLIPTokenizer`], *optional*):
-                A `CLIPTokenizer` to tokenize text. If not specified, function will take self.tokenizer.
-            weight_name (`str`, *optional*):
-                Name of a custom weight file. This should be used when:
+        if set == "train":
+            self._length = self.num_images * repeats
 
-                    - The saved textual inversion file is in 🤗 Diffusers format, but was saved under a specific weight
-                      name such as `text_inv.bin`.
-                    - The saved textual inversion file is in the Automatic1111 format.
-            cache_dir (`Union[str, os.PathLike]`, *optional*):
-                Path to a directory where a downloaded pretrained model configuration is cached if the standard cache
-                is not used.
-            force_download (`bool`, *optional*, defaults to `False`):
-                Whether or not to force the (re-)download of the model weights and configuration files, overriding the
-                cached versions if they exist.
-            resume_download:
-                Deprecated and ignored. All downloads are now resumed by default when possible. Will be removed in v1
-                of Diffusers.
-            proxies (`Dict[str, str]`, *optional*):
-                A dictionary of proxy servers to use by protocol or endpoint, for example, `{'http': 'foo.bar:3128',
-                'http://hostname': 'foo.bar:4012'}`. The proxies are used on each request.
-            local_files_only (`bool`, *optional*, defaults to `False`):
-                Whether to only load local model weights and configuration files or not. If set to `True`, the model
-                won't be downloaded from the Hub.
-            token (`str` or *bool*, *optional*):
-                The token to use as HTTP bearer authorization for remote files. If `True`, the token generated from
-                `diffusers-cli login` (stored in `~/.huggingface`) is used.
-            revision (`str`, *optional*, defaults to `"main"`):
-                The specific model version to use. It can be a branch name, a tag name, a commit id, or any identifier
-                allowed by Git.
-            subfolder (`str`, *optional*, defaults to `""`):
-                The subfolder location of a model file within a larger model repository on the Hub or locally.
-            mirror (`str`, *optional*):
-                Mirror source to resolve accessibility issues if you're downloading a model in China. We do not
-                guarantee the timeliness or safety of the source, and you should refer to the mirror site for more
-                information.
+        self.interpolation = {
+            "linear": PIL_INTERPOLATION["linear"],
+            "bilinear": PIL_INTERPOLATION["bilinear"],
+            "bicubic": PIL_INTERPOLATION["bicubic"],
+            "lanczos": PIL_INTERPOLATION["lanczos"],
+        }[interpolation]
 
-        Example:
+        self.templates = imagenet_style_templates_small if learnable_property == "style" else imagenet_templates_small
+        self.flip_transform = transforms.RandomHorizontalFlip(p=self.flip_p)
 
-        To load a Textual Inversion embedding vector in 🤗 Diffusers format:
+    def __len__(self):
+        return self._length
 
-        ```py
-        from diffusers import StableDiffusionPipeline
-        import torch
+    def __getitem__(self, i):
+        example = {}
+        image = Image.open(self.image_paths[i % self.num_images])
 
-        model_id = "runwayml/stable-diffusion-v1-5"
-        pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to("cuda")
+        if not image.mode == "RGB":
+            image = image.convert("RGB")
 
-        pipe.load_textual_inversion("sd-concepts-library/cat-toy")
+        placeholder_string = self.placeholder_token
+        text = random.choice(self.templates).format(placeholder_string)
 
-        prompt = "A <cat-toy> backpack"
+        example["input_ids"] = self.tokenizer(
+            text,
+            padding="max_length",
+            truncation=True,
+            max_length=self.tokenizer.model_max_length,
+            return_tensors="pt",
+        ).input_ids[0]
 
-        image = pipe(prompt, num_inference_steps=50).images[0]
-        image.save("cat-backpack.png")
-        ```
+        # default to score-sde preprocessing
+        img = np.array(image).astype(np.uint8)
 
-        To load a Textual Inversion embedding vector in Automatic1111 format, make sure to download the vector first
-        (for example from [civitAI](https://civitai.com/models/3036?modelVersionId=9857)) and then load the vector
-        locally:
+        if self.center_crop:
+            crop = min(img.shape[0], img.shape[1])
+            (
+                h,
+                w,
+            ) = (
+                img.shape[0],
+                img.shape[1],
+            )
+            img = img[(h - crop) // 2 : (h + crop) // 2, (w - crop) // 2 : (w + crop) // 2]
 
-        ```py
-        from diffusers import StableDiffusionPipeline
-        import torch
+        image = Image.fromarray(img)
+        image = image.resize((self.size, self.size), resample=self.interpolation)
 
-        model_id = "runwayml/stable-diffusion-v1-5"
-        pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to("cuda")
+        image = self.flip_transform(image)
+        image = np.array(image).astype(np.uint8)
+        image = (image / 127.5 - 1.0).astype(np.float32)
 
-        pipe.load_textual_inversion("./charturnerv2.pt", token="charturnerv2")
+        example["pixel_values"] = torch.from_numpy(image).permute(2, 0, 1)
+        return example
 
-        prompt = "charturnerv2, multiple views of the same character in the same outfit, a character turnaround of a woman wearing a black jacket and red shirt, best quality, intricate details."
 
-        image = pipe(prompt, num_inference_steps=50).images[0]
-        image.save("character.png")
-        ```
-
-        """
-        # 1. Set correct tokenizer and text encoder
-        tokenizer = tokenizer or getattr(self, "tokenizer", None)
-        text_encoder = text_encoder or getattr(self, "text_encoder", None)
-
-        # 2. Normalize inputs
-        pretrained_model_name_or_paths = (
-            [pretrained_model_name_or_path]
-            if not isinstance(pretrained_model_name_or_path, list)
-            else pretrained_model_name_or_path
+def main():
+    args = parse_args()
+    if args.report_to == "wandb" and args.hub_token is not None:
+        raise ValueError(
+            "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
+            " Please use `huggingface-cli login` to authenticate with the Hub."
         )
-        tokens = [token] if not isinstance(token, list) else token
-        if tokens[0] is None:
-            tokens = tokens * len(pretrained_model_name_or_paths)
 
-        # 3. Check inputs
-        self._check_text_inv_inputs(tokenizer, text_encoder, pretrained_model_name_or_paths, tokens)
+    logging_dir = os.path.join(args.output_dir, args.logging_dir)
+    accelerator_project_config = ProjectConfiguration(
+        total_limit=args.checkpoints_total_limit, project_dir=args.output_dir, logging_dir=logging_dir
+    )
 
-        # 4. Load state dicts of textual embeddings
-        state_dicts = load_textual_inversion_state_dicts(pretrained_model_name_or_paths, **kwargs)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        mixed_precision=args.mixed_precision,
+        log_with=args.report_to,
+        project_config=accelerator_project_config,
+    )
 
-        # 4.1 Handle the special case when state_dict is a tensor that contains n embeddings for n tokens
-        if len(tokens) > 1 and len(state_dicts) == 1:
-            if isinstance(state_dicts[0], torch.Tensor):
-                state_dicts = list(state_dicts[0])
-                if len(tokens) != len(state_dicts):
-                    raise ValueError(
-                        f"You have passed a state_dict contains {len(state_dicts)} embeddings, and list of tokens of length {len(tokens)} "
-                        f"Make sure both have the same length."
-                    )
+    # Disable AMP for MPS.
+    if torch.backends.mps.is_available():
+        accelerator.native_amp = False
 
-        # 4. Retrieve tokens and embeddings
-        tokens, embeddings = self._retrieve_tokens_and_embeddings(tokens, state_dicts, tokenizer)
+    if args.report_to == "wandb":
+        if not is_wandb_available():
+            raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
 
-        # 5. Extend tokens and embeddings for multi vector
-        tokens, embeddings = self._extend_tokens_and_embeddings(tokens, embeddings, tokenizer)
+    # Make one log on every process with the configuration for debugging.
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
+    logger.info(accelerator.state, main_process_only=False)
+    if accelerator.is_local_main_process:
+        transformers.utils.logging.set_verbosity_warning()
+        diffusers.utils.logging.set_verbosity_info()
+    else:
+        transformers.utils.logging.set_verbosity_error()
+        diffusers.utils.logging.set_verbosity_error()
 
-        # 6. Make sure all embeddings have the correct size
-        expected_emb_dim = text_encoder.get_input_embeddings().weight.shape[-1]
-        if any(expected_emb_dim != emb.shape[-1] for emb in embeddings):
-            raise ValueError(
-                "Loaded embeddings are of incorrect shape. Expected each textual inversion embedding "
-                "to be of shape {input_embeddings.shape[-1]}, but are {embeddings.shape[-1]} "
+    # If passed along, set the training seed now.
+    if args.seed is not None:
+        set_seed(args.seed)
+
+    # Handle the repository creation
+    if accelerator.is_main_process:
+        if args.output_dir is not None:
+            os.makedirs(args.output_dir, exist_ok=True)
+
+        if args.push_to_hub:
+            repo_id = create_repo(
+                repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
+            ).repo_id
+
+    # Load tokenizer
+    if args.tokenizer_name:
+        tokenizer = CLIPTokenizer.from_pretrained(args.tokenizer_name)
+    elif args.pretrained_model_name_or_path:
+        tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
+
+    # Load scheduler and models
+    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    text_encoder = CLIPTextModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
+    )
+    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
+    unet = UNet2DConditionModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
+    )
+
+    # Add the placeholder token in tokenizer
+    placeholder_tokens = [args.placeholder_token]
+
+    if args.num_vectors < 1:
+        raise ValueError(f"--num_vectors has to be larger or equal to 1, but is {args.num_vectors}")
+
+    # add dummy tokens for multi-vector
+    additional_tokens = []
+    for i in range(1, args.num_vectors):
+        additional_tokens.append(f"{args.placeholder_token}_{i}")
+    placeholder_tokens += additional_tokens
+
+    num_added_tokens = tokenizer.add_tokens(placeholder_tokens)
+    if num_added_tokens != args.num_vectors:
+        raise ValueError(
+            f"The tokenizer already contains the token {args.placeholder_token}. Please pass a different"
+            " `placeholder_token` that is not already in the tokenizer."
+        )
+
+    # Convert the initializer_token, placeholder_token to ids
+    token_ids = tokenizer.encode(args.initializer_token, add_special_tokens=False)
+    # Check if initializer_token is a single token or a sequence of tokens
+    if len(token_ids) > 1:
+        raise ValueError("The initializer token must be a single token.")
+
+    initializer_token_id = token_ids[0]
+    placeholder_token_ids = tokenizer.convert_tokens_to_ids(placeholder_tokens)
+
+    # Resize the token embeddings as we are adding new special tokens to the tokenizer
+    text_encoder.resize_token_embeddings(len(tokenizer))
+
+    # Initialise the newly added placeholder token with the embeddings of the initializer token
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    with torch.no_grad():
+        for token_id in placeholder_token_ids:
+            token_embeds[token_id] = token_embeds[initializer_token_id].clone()
+
+    # Freeze vae and unet
+    vae.requires_grad_(False)
+    unet.requires_grad_(False)
+    # Freeze all parameters except for the token embeddings in text encoder
+    text_encoder.text_model.encoder.requires_grad_(False)
+    text_encoder.text_model.final_layer_norm.requires_grad_(False)
+    text_encoder.text_model.embeddings.position_embedding.requires_grad_(False)
+
+    if args.gradient_checkpointing:
+        # Keep unet in train mode if we are using gradient checkpointing to save memory.
+        # The dropout cannot be != 0 so it doesn't matter if we are in eval or train mode.
+        unet.train()
+        text_encoder.gradient_checkpointing_enable()
+        unet.enable_gradient_checkpointing()
+
+    if args.enable_xformers_memory_efficient_attention:
+        if is_xformers_available():
+            import xformers
+
+            xformers_version = version.parse(xformers.__version__)
+            if xformers_version == version.parse("0.0.16"):
+                logger.warning(
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                )
+            unet.enable_xformers_memory_efficient_attention()
+        else:
+            raise ValueError("xformers is not available. Make sure it is installed correctly")
+
+    # Enable TF32 for faster training on Ampere GPUs,
+    # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
+    if args.allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+    if args.scale_lr:
+        args.learning_rate = (
+            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+        )
+
+    # Initialize the optimizer
+    optimizer = torch.optim.AdamW(
+        text_encoder.get_input_embeddings().parameters(),  # only optimize the embeddings
+        lr=args.learning_rate,
+        betas=(args.adam_beta1, args.adam_beta2),
+        weight_decay=args.adam_weight_decay,
+        eps=args.adam_epsilon,
+    )
+
+    optimizer = ORT_FP16_Optimizer(optimizer)
+
+    # Dataset and DataLoaders creation:
+    train_dataset = TextualInversionDataset(
+        data_root=args.train_data_dir,
+        tokenizer=tokenizer,
+        size=args.resolution,
+        placeholder_token=args.placeholder_token,
+        repeats=args.repeats,
+        learnable_property=args.learnable_property,
+        center_crop=args.center_crop,
+        set="train",
+    )
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dataloader_num_workers
+    )
+    if args.validation_epochs is not None:
+        warnings.warn(
+            f"FutureWarning: You are doing logging with validation_epochs={args.validation_epochs}."
+            " Deprecated validation_epochs in favor of `validation_steps`"
+            f"Setting `args.validation_steps` to {args.validation_epochs * len(train_dataset)}",
+            FutureWarning,
+            stacklevel=2,
+        )
+        args.validation_steps = args.validation_epochs * len(train_dataset)
+
+    # Scheduler and math around the number of training steps.
+    overrode_max_train_steps = False
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    if args.max_train_steps is None:
+        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        overrode_max_train_steps = True
+
+    lr_scheduler = get_scheduler(
+        args.lr_scheduler,
+        optimizer=optimizer,
+        num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
+        num_training_steps=args.max_train_steps * accelerator.num_processes,
+    )
+
+    # Prepare everything with our `accelerator`.
+    text_encoder, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        text_encoder, optimizer, train_dataloader, lr_scheduler
+    )
+
+    text_encoder = ORTModule(text_encoder)
+    unet = ORTModule(unet)
+    vae = ORTModule(vae)
+
+    # For mixed precision training we cast the unet and vae weights to half-precision
+    # as these models are only used for inference, keeping weights in full precision is not required.
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+
+    # Move vae and unet to device and cast to weight_dtype
+    unet.to(accelerator.device, dtype=weight_dtype)
+    vae.to(accelerator.device, dtype=weight_dtype)
+
+    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    if overrode_max_train_steps:
+        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+    # Afterwards we recalculate our number of training epochs
+    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+
+    # We need to initialize the trackers we use, and also store our configuration.
+    # The trackers initializes automatically on the main process.
+    if accelerator.is_main_process:
+        accelerator.init_trackers("textual_inversion", config=vars(args))
+
+    # Train!
+    total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+
+    logger.info("***** Running training *****")
+    logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    global_step = 0
+    first_epoch = 0
+    # Potentially load in the weights and states from a previous save
+    if args.resume_from_checkpoint:
+        if args.resume_from_checkpoint != "latest":
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the most recent checkpoint
+            dirs = os.listdir(args.output_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+            path = dirs[-1] if len(dirs) > 0 else None
+
+        if path is None:
+            accelerator.print(
+                f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
+            )
+            args.resume_from_checkpoint = None
+        else:
+            accelerator.print(f"Resuming from checkpoint {path}")
+            accelerator.load_state(os.path.join(args.output_dir, path))
+            global_step = int(path.split("-")[1])
+
+            resume_global_step = global_step * args.gradient_accumulation_steps
+            first_epoch = global_step // num_update_steps_per_epoch
+            resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
+
+    # Only show the progress bar once on each machine.
+    progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar.set_description("Steps")
+
+    # keep original embeddings as reference
+    orig_embeds_params = accelerator.unwrap_model(text_encoder).get_input_embeddings().weight.data.clone()
+
+    for epoch in range(first_epoch, args.num_train_epochs):
+        text_encoder.train()
+        for step, batch in enumerate(train_dataloader):
+            # Skip steps until we reach the resumed step
+            if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
+                if step % args.gradient_accumulation_steps == 0:
+                    progress_bar.update(1)
+                continue
+
+            with accelerator.accumulate(text_encoder):
+                # Convert images to latent space
+                latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample().detach()
+                latents = latents * vae.config.scaling_factor
+
+                # Sample noise that we'll add to the latents
+                noise = torch.randn_like(latents)
+                bsz = latents.shape[0]
+                # Sample a random timestep for each image
+                timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+                timesteps = timesteps.long()
+
+                # Add noise to the latents according to the noise magnitude at each timestep
+                # (this is the forward diffusion process)
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+                # Get the text embedding for conditioning
+                encoder_hidden_states = text_encoder(batch["input_ids"])[0].to(dtype=weight_dtype)
+
+                # Predict the noise residual
+                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+
+                # Get the target for loss depending on the prediction type
+                if noise_scheduler.config.prediction_type == "epsilon":
+                    target = noise
+                elif noise_scheduler.config.prediction_type == "v_prediction":
+                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                else:
+                    raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+                accelerator.backward(loss)
+
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+
+                # Let's make sure we don't update any embedding weights besides the newly added token
+                index_no_updates = torch.ones((len(tokenizer),), dtype=torch.bool)
+                index_no_updates[min(placeholder_token_ids) : max(placeholder_token_ids) + 1] = False
+
+                with torch.no_grad():
+                    accelerator.unwrap_model(text_encoder).get_input_embeddings().weight[
+                        index_no_updates
+                    ] = orig_embeds_params[index_no_updates]
+
+            # Checks if the accelerator has performed an optimization step behind the scenes
+            if accelerator.sync_gradients:
+                images = []
+                progress_bar.update(1)
+                global_step += 1
+                if global_step % args.save_steps == 0:
+                    save_path = os.path.join(args.output_dir, f"learned_embeds-steps-{global_step}.bin")
+                    save_progress(text_encoder, placeholder_token_ids, accelerator, args, save_path)
+
+                if accelerator.is_main_process:
+                    if global_step % args.checkpointing_steps == 0:
+                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                        accelerator.save_state(save_path)
+                        logger.info(f"Saved state to {save_path}")
+
+                    if args.validation_prompt is not None and global_step % args.validation_steps == 0:
+                        images = log_validation(
+                            text_encoder, tokenizer, unet, vae, args, accelerator, weight_dtype, epoch
+                        )
+
+            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            progress_bar.set_postfix(**logs)
+            accelerator.log(logs, step=global_step)
+
+            if global_step >= args.max_train_steps:
+                break
+    # Create the pipeline using the trained modules and save it.
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        if args.push_to_hub and not args.save_as_full_pipeline:
+            logger.warning("Enabling full model saving because --push_to_hub=True was specified.")
+            save_full_model = True
+        else:
+            save_full_model = args.save_as_full_pipeline
+        if save_full_model:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                text_encoder=accelerator.unwrap_model(text_encoder),
+                vae=vae,
+                unet=unet,
+                tokenizer=tokenizer,
+            )
+            pipeline.save_pretrained(args.output_dir)
+        # Save the newly trained embeddings
+        save_path = os.path.join(args.output_dir, "learned_embeds.bin")
+        save_progress(text_encoder, placeholder_token_ids, accelerator, args, save_path)
+
+        if args.push_to_hub:
+            save_model_card(
+                repo_id,
+                images=images,
+                base_model=args.pretrained_model_name_or_path,
+                repo_folder=args.output_dir,
+            )
+            upload_folder(
+                repo_id=repo_id,
+                folder_path=args.output_dir,
+                commit_message="End of training",
+                ignore_patterns=["step_*", "epoch_*"],
             )
 
-        # 7. Now we can be sure that loading the embedding matrix works
-        # < Unsafe code:
+    accelerator.end_training()
 
-        # 7.1 Offload all hooks in case the pipeline was cpu offloaded before make sure, we offload and onload again
-        is_model_cpu_offload = False
-        is_sequential_cpu_offload = False
-        if self.hf_device_map is None:
-            for _, component in self.components.items():
-                if isinstance(component, nn.Module):
-                    if hasattr(component, "_hf_hook"):
-                        is_model_cpu_offload = isinstance(getattr(component, "_hf_hook"), CpuOffload)
-                        is_sequential_cpu_offload = (
-                            isinstance(getattr(component, "_hf_hook"), AlignDevicesHook)
-                            or hasattr(component._hf_hook, "hooks")
-                            and isinstance(component._hf_hook.hooks[0], AlignDevicesHook)
-                        )
-                        logger.info(
-                            "Accelerate hooks detected. Since you have called `load_textual_inversion()`, the previous hooks will be first removed. Then the textual inversion parameters will be loaded and the hooks will be applied again."
-                        )
-                        remove_hook_from_module(component, recurse=is_sequential_cpu_offload)
 
-        # 7.2 save expected device and dtype
-        device = text_encoder.device
-        dtype = text_encoder.dtype
-
-        # 7.3 Increase token embedding matrix
-        text_encoder.resize_token_embeddings(len(tokenizer) + len(tokens))
-        input_embeddings = text_encoder.get_input_embeddings().weight
-
-        # 7.4 Load token and embedding
-        for token, embedding in zip(tokens, embeddings):
-            # add tokens and get ids
-            tokenizer.add_tokens(token)
-            token_id = tokenizer.convert_tokens_to_ids(token)
-            input_embeddings.data[token_id] = embedding
-            logger.info(f"Loaded textual inversion embedding for {token}.")
-
-        input_embeddings.to(dtype=dtype, device=device)
-
-        # 7.5 Offload the model again
-        if is_model_cpu_offload:
-            self.enable_model_cpu_offload()
-        elif is_sequential_cpu_offload:
-            self.enable_sequential_cpu_offload()
-
-        # / Unsafe Code >
-
-    def unload_textual_inversion(
-        self,
-        tokens: Optional[Union[str, List[str]]] = None,
-        tokenizer: Optional["PreTrainedTokenizer"] = None,
-        text_encoder: Optional["PreTrainedModel"] = None,
-    ):
-        r"""
-        Unload Textual Inversion embeddings from the text encoder of [`StableDiffusionPipeline`]
-
-        Example:
-        ```py
-        from diffusers import AutoPipelineForText2Image
-        import torch
-
-        pipeline = AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5")
-
-        # Example 1
-        pipeline.load_textual_inversion("sd-concepts-library/gta5-artwork")
-        pipeline.load_textual_inversion("sd-concepts-library/moeb-style")
-
-        # Remove all token embeddings
-        pipeline.unload_textual_inversion()
-
-        # Example 2
-        pipeline.load_textual_inversion("sd-concepts-library/moeb-style")
-        pipeline.load_textual_inversion("sd-concepts-library/gta5-artwork")
-
-        # Remove just one token
-        pipeline.unload_textual_inversion("<moe-bius>")
-
-        # Example 3: unload from SDXL
-        pipeline = AutoPipelineForText2Image.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0")
-        embedding_path = hf_hub_download(
-            repo_id="linoyts/web_y2k", filename="web_y2k_emb.safetensors", repo_type="model"
-        )
-
-        # load embeddings to the text encoders
-        state_dict = load_file(embedding_path)
-
-        # load embeddings of text_encoder 1 (CLIP ViT-L/14)
-        pipeline.load_textual_inversion(
-            state_dict["clip_l"],
-            token=["<s0>", "<s1>"],
-            text_encoder=pipeline.text_encoder,
-            tokenizer=pipeline.tokenizer,
-        )
-        # load embeddings of text_encoder 2 (CLIP ViT-G/14)
-        pipeline.load_textual_inversion(
-            state_dict["clip_g"],
-            token=["<s0>", "<s1>"],
-            text_encoder=pipeline.text_encoder_2,
-            tokenizer=pipeline.tokenizer_2,
-        )
-
-        # Unload explicitly from both text encoders abd tokenizers
-        pipeline.unload_textual_inversion(
-            tokens=["<s0>", "<s1>"], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer
-        )
-        pipeline.unload_textual_inversion(
-            tokens=["<s0>", "<s1>"], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2
-        )
-        ```
-        """
-
-        tokenizer = tokenizer or getattr(self, "tokenizer", None)
-        text_encoder = text_encoder or getattr(self, "text_encoder", None)
-
-        # Get textual inversion tokens and ids
-        token_ids = []
-        last_special_token_id = None
-
-        if tokens:
-            if isinstance(tokens, str):
-                tokens = [tokens]
-            for added_token_id, added_token in tokenizer.added_tokens_decoder.items():
-                if not added_token.special:
-                    if added_token.content in tokens:
-                        token_ids.append(added_token_id)
-                else:
-                    last_special_token_id = added_token_id
-            if len(token_ids) == 0:
-                raise ValueError("No tokens to remove found")
-        else:
-            tokens = []
-            for added_token_id, added_token in tokenizer.added_tokens_decoder.items():
-                if not added_token.special:
-                    token_ids.append(added_token_id)
-                    tokens.append(added_token.content)
-                else:
-                    last_special_token_id = added_token_id
-
-        # Delete from tokenizer
-        for token_id, token_to_remove in zip(token_ids, tokens):
-            del tokenizer._added_tokens_decoder[token_id]
-            del tokenizer._added_tokens_encoder[token_to_remove]
-
-        # Make all token ids sequential in tokenizer
-        key_id = 1
-        for token_id in tokenizer.added_tokens_decoder:
-            if token_id > last_special_token_id and token_id > last_special_token_id + key_id:
-                token = tokenizer._added_tokens_decoder[token_id]
-                tokenizer._added_tokens_decoder[last_special_token_id + key_id] = token
-                del tokenizer._added_tokens_decoder[token_id]
-                tokenizer._added_tokens_encoder[token.content] = last_special_token_id + key_id
-                key_id += 1
-        tokenizer._update_trie()
-
-        # Delete from text encoder
-        text_embedding_dim = text_encoder.get_input_embeddings().embedding_dim
-        temp_text_embedding_weights = text_encoder.get_input_embeddings().weight
-        text_embedding_weights = temp_text_embedding_weights[: last_special_token_id + 1]
-        to_append = []
-        for i in range(last_special_token_id + 1, temp_text_embedding_weights.shape[0]):
-            if i not in token_ids:
-                to_append.append(temp_text_embedding_weights[i].unsqueeze(0))
-        if len(to_append) > 0:
-            to_append = torch.cat(to_append, dim=0)
-            text_embedding_weights = torch.cat([text_embedding_weights, to_append], dim=0)
-        text_embeddings_filtered = nn.Embedding(text_embedding_weights.shape[0], text_embedding_dim)
-        text_embeddings_filtered.weight.data = text_embedding_weights
-        text_encoder.set_input_embeddings(text_embeddings_filtered)
+if __name__ == "__main__":
+    main()

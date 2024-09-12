@@ -1,8 +1,7 @@
-transformers>=4.25.1
-flax
-optax
+diffusers
 torch
 torchvision
 ftfy
 tensorboard
 Jinja2
+transformers

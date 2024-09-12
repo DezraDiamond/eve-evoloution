@@ -10,22 +10,22 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Understanding pipelines, models and schedulers
+# 파이프라인, 모델 및 스케줄러 이해하기
 
 [[open-in-colab]]
 
-🧨 Diffusers is designed to be a user-friendly and flexible toolbox for building diffusion systems tailored to your use-case. At the core of the toolbox are models and schedulers. While the [`DiffusionPipeline`] bundles these components together for convenience, you can also unbundle the pipeline and use the models and schedulers separately to create new diffusion systems.
+🧨 Diffusers는 사용자 친화적이며 유연한 도구 상자로, 사용사례에 맞게 diffusion 시스템을 구축 할 수 있도록 설계되었습니다. 이 도구 상자의 핵심은 모델과 스케줄러입니다. [`DiffusionPipeline`]은 편의를 위해 이러한 구성 요소를 번들로 제공하지만, 파이프라인을 분리하고 모델과 스케줄러를 개별적으로 사용해 새로운 diffusion 시스템을 만들 수도 있습니다.
 
-In this tutorial, you'll learn how to use models and schedulers to assemble a diffusion system for inference, starting with a basic pipeline and then progressing to the Stable Diffusion pipeline.
+이 튜토리얼에서는 기본 파이프라인부터 시작해 Stable Diffusion 파이프라인까지 진행하며 모델과 스케줄러를 사용해 추론을 위한 diffusion 시스템을 조립하는 방법을 배웁니다.
 
-## Deconstruct a basic pipeline
+## 기본 파이프라인 해체하기
 
-A pipeline is a quick and easy way to run a model for inference, requiring no more than four lines of code to generate an image:
+파이프라인은 추론을 위해 모델을 실행하는 빠르고 쉬운 방법으로, 이미지를 생성하는 데 코드가 4줄 이상 필요하지 않습니다:
 
 ```py
 >>> from diffusers import DDPMPipeline
 
->>> ddpm = DDPMPipeline.from_pretrained("google/ddpm-cat-256", use_safetensors=True).to("cuda")
+>>> ddpm = DDPMPipeline.from_pretrained("google/ddpm-cat-256").to("cuda")
 >>> image = ddpm(num_inference_steps=25).images[0]
 >>> image
 ```
@@ -34,89 +34,89 @@ A pipeline is a quick and easy way to run a model for inference, requiring no mo
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/ddpm-cat.png" alt="Image of cat created from DDPMPipeline"/>
 </div>
 
-That was super easy, but how did the pipeline do that? Let's breakdown the pipeline and take a look at what's happening under the hood.
+정말 쉽습니다. 그런데 파이프라인은 어떻게 이렇게 할 수 있었을까요? 파이프라인을 세분화하여 내부에서 어떤 일이 일어나고 있는지 살펴보겠습니다.
 
-In the example above, the pipeline contains a [`UNet2DModel`] model and a [`DDPMScheduler`]. The pipeline denoises an image by taking random noise the size of the desired output and passing it through the model several times. At each timestep, the model predicts the *noise residual* and the scheduler uses it to predict a less noisy image. The pipeline repeats this process until it reaches the end of the specified number of inference steps.
+위 예시에서 파이프라인에는 [`UNet2DModel`] 모델과 [`DDPMScheduler`]가 포함되어 있습니다. 파이프라인은 원하는 출력 크기의 랜덤 노이즈를 받아 모델을 여러번 통과시켜 이미지의 노이즈를 제거합니다. 각 timestep에서 모델은 *noise residual*을 예측하고 스케줄러는 이를 사용하여 노이즈가 적은 이미지를 예측합니다. 파이프라인은 지정된 추론 스텝수에 도달할 때까지 이 과정을 반복합니다.
 
-To recreate the pipeline with the model and scheduler separately, let's write our own denoising process.
+모델과 스케줄러를 별도로 사용하여 파이프라인을 다시 생성하기 위해 자체적인 노이즈 제거 프로세스를 작성해 보겠습니다.
 
-1. Load the model and scheduler:
+1. 모델과 스케줄러를 불러옵니다:
 
-```py
->>> from diffusers import DDPMScheduler, UNet2DModel
+    ```py
+    >>> from diffusers import DDPMScheduler, UNet2DModel
 
->>> scheduler = DDPMScheduler.from_pretrained("google/ddpm-cat-256")
->>> model = UNet2DModel.from_pretrained("google/ddpm-cat-256", use_safetensors=True).to("cuda")
-```
+    >>> scheduler = DDPMScheduler.from_pretrained("google/ddpm-cat-256")
+    >>> model = UNet2DModel.from_pretrained("google/ddpm-cat-256").to("cuda")
+    ```
 
-2. Set the number of timesteps to run the denoising process for:
+2. 노이즈 제거 프로세스를 실행할 timestep 수를 설정합니다:
 
-```py
->>> scheduler.set_timesteps(50)
-```
+    ```py
+    >>> scheduler.set_timesteps(50)
+    ```
 
-3. Setting the scheduler timesteps creates a tensor with evenly spaced elements in it, 50 in this example. Each element corresponds to a timestep at which the model denoises an image. When you create the denoising loop later, you'll iterate over this tensor to denoise an image:
+3. 스케줄러의 timestep을 설정하면 균등한 간격의 구성 요소를 가진 텐서가 생성됩니다.(이 예시에서는 50개) 각 요소는 모델이 이미지의 노이즈를 제거하는 시간 간격에 해당합니다. 나중에 노이즈 제거 루프를 만들 때 이 텐서를 반복하여 이미지의 노이즈를 제거합니다:
 
-```py
->>> scheduler.timesteps
-tensor([980, 960, 940, 920, 900, 880, 860, 840, 820, 800, 780, 760, 740, 720,
-    700, 680, 660, 640, 620, 600, 580, 560, 540, 520, 500, 480, 460, 440,
-    420, 400, 380, 360, 340, 320, 300, 280, 260, 240, 220, 200, 180, 160,
-    140, 120, 100,  80,  60,  40,  20,   0])
-```
+    ```py
+    >>> scheduler.timesteps
+    tensor([980, 960, 940, 920, 900, 880, 860, 840, 820, 800, 780, 760, 740, 720,
+        700, 680, 660, 640, 620, 600, 580, 560, 540, 520, 500, 480, 460, 440,
+        420, 400, 380, 360, 340, 320, 300, 280, 260, 240, 220, 200, 180, 160,
+        140, 120, 100,  80,  60,  40,  20,   0])
+    ```
 
-4. Create some random noise with the same shape as the desired output:
+4. 원하는 출력과 같은 모양을 가진 랜덤 노이즈를 생성합니다:
 
-```py
->>> import torch
+    ```py
+    >>> import torch
 
->>> sample_size = model.config.sample_size
->>> noise = torch.randn((1, 3, sample_size, sample_size), device="cuda")
-```
+    >>> sample_size = model.config.sample_size
+    >>> noise = torch.randn((1, 3, sample_size, sample_size), device="cuda")
+    ```
 
-5. Now write a loop to iterate over the timesteps. At each timestep, the model does a [`UNet2DModel.forward`] pass and returns the noisy residual. The scheduler's [`~DDPMScheduler.step`] method takes the noisy residual, timestep, and input and it predicts the image at the previous timestep. This output becomes the next input to the model in the denoising loop, and it'll repeat until it reaches the end of the `timesteps` array.
+5. 이제 timestep을 반복하는 루프를 작성합니다. 각 timestep에서 모델은 [`UNet2DModel.forward`]를 통해 noisy residual을 반환합니다. 스케줄러의 [`~DDPMScheduler.step`] 메서드는 noisy residual, timestep, 그리고 입력을 받아 이전 timestep에서 이미지를 예측합니다. 이 출력은 노이즈 제거 루프의 모델에 대한 다음 입력이 되며, `timesteps` 배열의 끝에 도달할 때까지 반복됩니다.
 
-```py
->>> input = noise
+    ```py
+    >>> input = noise
 
->>> for t in scheduler.timesteps:
-...     with torch.no_grad():
-...         noisy_residual = model(input, t).sample
-...     previous_noisy_sample = scheduler.step(noisy_residual, t, input).prev_sample
-...     input = previous_noisy_sample
-```
+    >>> for t in scheduler.timesteps:
+    ...     with torch.no_grad():
+    ...         noisy_residual = model(input, t).sample
+    ...     previous_noisy_sample = scheduler.step(noisy_residual, t, input).prev_sample
+    ...     input = previous_noisy_sample
+    ```
 
-This is the entire denoising process, and you can use this same pattern to write any diffusion system.
+    이것이 전체 노이즈 제거 프로세스이며, 동일한 패턴을 사용해 모든 diffusion 시스템을 작성할 수 있습니다.
 
-6. The last step is to convert the denoised output into an image:
+6. 마지막 단계는 노이즈가 제거된 출력을 이미지로 변환하는 것입니다:
 
-```py
->>> from PIL import Image
->>> import numpy as np
+    ```py
+    >>> from PIL import Image
+    >>> import numpy as np
 
->>> image = (input / 2 + 0.5).clamp(0, 1).squeeze()
->>> image = (image.permute(1, 2, 0) * 255).round().to(torch.uint8).cpu().numpy()
->>> image = Image.fromarray(image)
->>> image
-```
+    >>> image = (input / 2 + 0.5).clamp(0, 1)
+    >>> image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
+    >>> image = Image.fromarray((image * 255).round().astype("uint8"))
+    >>> image
+    ```
 
-In the next section, you'll put your skills to the test and breakdown the more complex Stable Diffusion pipeline. The steps are more or less the same. You'll initialize the necessary components, and set the number of timesteps to create a `timestep` array. The `timestep` array is used in the denoising loop, and for each element in this array, the model predicts a less noisy image. The denoising loop iterates over the `timestep`'s, and at each timestep, it outputs a noisy residual and the scheduler uses it to predict a less noisy image at the previous timestep. This process is repeated until you reach the end of the `timestep` array.
+다음 섹션에서는 여러분의 기술을 시험해보고 좀 더 복잡한 Stable Diffusion 파이프라인을 분석해 보겠습니다. 방법은 거의 동일합니다. 필요한 구성요소들을 초기화하고 timestep수를 설정하여 `timestep` 배열을 생성합니다. 노이즈 제거 루프에서 `timestep` 배열이 사용되며, 이 배열의 각 요소에 대해 모델은 노이즈가 적은 이미지를 예측합니다. 노이즈 제거 루프는 `timestep`을 반복하고 각 timestep에서 noise residual을 출력하고 스케줄러는 이를 사용하여 이전 timestep에서 노이즈가 덜한 이미지를 예측합니다. 이 프로세스는 `timestep` 배열의 끝에 도달할 때까지 반복됩니다.
 
-Let's try it out!
+한번 사용해 봅시다!
 
-## Deconstruct the Stable Diffusion pipeline
+## Stable Diffusion 파이프라인 해체하기
 
-Stable Diffusion is a text-to-image *latent diffusion* model. It is called a latent diffusion model because it works with a lower-dimensional representation of the image instead of the actual pixel space, which makes it more memory efficient. The encoder compresses the image into a smaller representation, and a decoder to convert the compressed representation back into an image. For text-to-image models, you'll need a tokenizer and an encoder to generate text embeddings. From the previous example, you already know you need a UNet model and a scheduler.
+Stable Diffusion 은 text-to-image *latent diffusion* 모델입니다. latent diffusion 모델이라고 불리는 이유는 실제 픽셀 공간 대신 이미지의 저차원의 표현으로 작업하기 때문이고, 메모리 효율이 더 높습니다. 인코더는 이미지를 더 작은 표현으로 압축하고, 디코더는 압축된 표현을 다시 이미지로 변환합니다. text-to-image 모델의 경우 텍스트 임베딩을 생성하기 위해 tokenizer와 인코더가 필요합니다. 이전 예제에서 이미 UNet 모델과 스케줄러가 필요하다는 것은 알고 계셨을 것입니다.
 
-As you can see, this is already more complex than the DDPM pipeline which only contains a UNet model. The Stable Diffusion model has three separate pretrained models.
+보시다시피, 이것은 UNet 모델만 포함된 DDPM 파이프라인보다 더 복잡합니다. Stable Diffusion 모델에는 세 개의 개별 사전학습된 모델이 있습니다.
 
 <Tip>
 
-💡 Read the [How does Stable Diffusion work?](https://huggingface.co/blog/stable_diffusion#how-does-stable-diffusion-work) blog for more details about how the VAE, UNet, and text encoder models work.
+💡 VAE, UNet 및 텍스트 인코더 모델의 작동방식에 대한 자세한 내용은 [How does Stable Diffusion work?](https://huggingface.co/blog/stable_diffusion#how-does-stable-diffusion-work) 블로그를 참조하세요.
 
 </Tip>
 
-Now that you know what you need for the Stable Diffusion pipeline, load all these components with the [`~ModelMixin.from_pretrained`] method. You can find them in the pretrained [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/runwayml/stable-diffusion-v1-5) checkpoint, and each component is stored in a separate subfolder:
+이제 Stable Diffusion 파이프라인에 필요한 구성요소들이 무엇인지 알았으니, [`~ModelMixin.from_pretrained`] 메서드를 사용해 모든 구성요소를 불러옵니다. 사전학습된 체크포인트 [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/runwayml/stable-diffusion-v1-5)에서 찾을 수 있으며, 각 구성요소들은 별도의 하위 폴더에 저장되어 있습니다:
 
 ```py
 >>> from PIL import Image
@@ -124,17 +124,13 @@ Now that you know what you need for the Stable Diffusion pipeline, load all thes
 >>> from transformers import CLIPTextModel, CLIPTokenizer
 >>> from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler
 
->>> vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae", use_safetensors=True)
+>>> vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae")
 >>> tokenizer = CLIPTokenizer.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="tokenizer")
->>> text_encoder = CLIPTextModel.from_pretrained(
-...     "CompVis/stable-diffusion-v1-4", subfolder="text_encoder", use_safetensors=True
-... )
->>> unet = UNet2DConditionModel.from_pretrained(
-...     "CompVis/stable-diffusion-v1-4", subfolder="unet", use_safetensors=True
-... )
+>>> text_encoder = CLIPTextModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="text_encoder")
+>>> unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet")
 ```
 
-Instead of the default [`PNDMScheduler`], exchange it for the [`UniPCMultistepScheduler`] to see how easy it is to plug a different scheduler in:
+기본 [`PNDMScheduler`] 대신, [`UniPCMultistepScheduler`]로 교체하여 다른 스케줄러를 얼마나 쉽게 연결할 수 있는지 확인합니다:
 
 ```py
 >>> from diffusers import UniPCMultistepScheduler
@@ -142,7 +138,7 @@ Instead of the default [`PNDMScheduler`], exchange it for the [`UniPCMultistepSc
 >>> scheduler = UniPCMultistepScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="scheduler")
 ```
 
-To speed up inference, move the models to a GPU since, unlike the scheduler, they have trainable weights:
+추론 속도를 높이려면 스케줄러와 달리 학습 가능한 가중치가 있으므로 모델을 GPU로 옮기세요:
 
 ```py
 >>> torch_device = "cuda"
@@ -151,29 +147,29 @@ To speed up inference, move the models to a GPU since, unlike the scheduler, the
 >>> unet.to(torch_device)
 ```
 
-### Create text embeddings
+### 텍스트 임베딩 생성하기
 
-The next step is to tokenize the text to generate embeddings. The text is used to condition the UNet model and steer the diffusion process towards something that resembles the input prompt.
+다음 단계는 임베딩을 생성하기 위해 텍스트를 토큰화하는 것입니다. 이 텍스트는 UNet 모델에서 condition으로 사용되고 입력 프롬프트와 유사한 방향으로 diffusion 프로세스를 조정하는 데 사용됩니다.
 
 <Tip>
 
-💡 The `guidance_scale` parameter determines how much weight should be given to the prompt when generating an image.
+💡 `guidance_scale` 매개변수는 이미지를 생성할 때 프롬프트에 얼마나 많은 가중치를 부여할지 결정합니다.
 
 </Tip>
 
-Feel free to choose any prompt you like if you want to generate something else!
+다른 프롬프트를 생성하고 싶다면 원하는 프롬프트를 자유롭게 선택하세요!
 
 ```py
 >>> prompt = ["a photograph of an astronaut riding a horse"]
->>> height = 512  # default height of Stable Diffusion
->>> width = 512  # default width of Stable Diffusion
->>> num_inference_steps = 25  # Number of denoising steps
->>> guidance_scale = 7.5  # Scale for classifier-free guidance
->>> generator = torch.manual_seed(0)  # Seed generator to create the initial latent noise
+>>> height = 512  # Stable Diffusion의 기본 높이
+>>> width = 512  # Stable Diffusion의 기본 너비
+>>> num_inference_steps = 25  # 노이즈 제거 스텝 수
+>>> guidance_scale = 7.5  # classifier-free guidance를 위한 scale
+>>> generator = torch.manual_seed(0)  # 초기 잠재 노이즈를 생성하는 seed generator
 >>> batch_size = len(prompt)
 ```
 
-Tokenize the text and generate the embeddings from the prompt:
+텍스트를 토큰화하고 프롬프트에서 임베딩을 생성합니다:
 
 ```py
 >>> text_input = tokenizer(
@@ -184,7 +180,7 @@ Tokenize the text and generate the embeddings from the prompt:
 ...     text_embeddings = text_encoder(text_input.input_ids.to(torch_device))[0]
 ```
 
-You'll also need to generate the *unconditional text embeddings* which are the embeddings for the padding token. These need to have the same shape (`batch_size` and `seq_length`) as the conditional `text_embeddings`:
+또한 패딩 토큰의 임베딩인 *unconditional 텍스트 임베딩*을 생성해야 합니다. 이 임베딩은 조건부 `text_embeddings`과 동일한 shape(`batch_size` 그리고 `seq_length`)을 가져야 합니다:
 
 ```py
 >>> max_length = text_input.input_ids.shape[-1]
@@ -192,19 +188,19 @@ You'll also need to generate the *unconditional text embeddings* which are the e
 >>> uncond_embeddings = text_encoder(uncond_input.input_ids.to(torch_device))[0]
 ```
 
-Let's concatenate the conditional and unconditional embeddings into a batch to avoid doing two forward passes:
+두번의 forward pass를 피하기 위해 conditional 임베딩과 unconditional 임베딩을 배치(batch)로 연결하겠습니다:
 
 ```py
 >>> text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 ```
 
-### Create random noise
+### 랜덤 노이즈 생성
 
-Next, generate some initial random noise as a starting point for the diffusion process. This is the latent representation of the image, and it'll be gradually denoised. At this point, the `latent` image is smaller than the final image size but that's okay though because the model will transform it into the final 512x512 image dimensions later.
+그다음 diffusion 프로세스의 시작점으로 초기 랜덤 노이즈를 생성합니다. 이것이 이미지의 잠재적 표현이며 점차적으로 노이즈가 제거됩니다. 이 시점에서 `latent` 이미지는 최종 이미지 크기보다 작지만 나중에 모델이 이를 512x512 이미지 크기로 변환하므로 괜찮습니다.
 
 <Tip>
 
-💡 The height and width are divided by 8 because the `vae` model has 3 down-sampling layers. You can check by running the following:
+💡 `vae` 모델에는 3개의 다운 샘플링 레이어가 있기 때문에 높이와 너비가 8로 나뉩니다. 다음을 실행하여 확인할 수 있습니다:
 
 ```py
 2 ** (len(vae.config.block_out_channels) - 1) == 8
@@ -220,19 +216,19 @@ Next, generate some initial random noise as a starting point for the diffusion p
 ... )
 ```
 
-### Denoise the image
+### 이미지 노이즈 제거
 
-Start by scaling the input with the initial noise distribution, *sigma*, the noise scale value, which is required for improved schedulers like [`UniPCMultistepScheduler`]:
+먼저 [`UniPCMultistepScheduler`]와 같은 향상된 스케줄러에 필요한 노이즈 스케일 값인 초기 노이즈 분포 *sigma* 로 입력을 스케일링 하는 것부터 시작합니다:
 
 ```py
 >>> latents = latents * scheduler.init_noise_sigma
 ```
 
-The last step is to create the denoising loop that'll progressively transform the pure noise in `latents` to an image described by your prompt. Remember, the denoising loop needs to do three things:
+마지막 단계는 `latent`의 순수한 노이즈를 점진적으로 프롬프트에 설명된 이미지로 변환하는 노이즈 제거 루프를 생성하는 것입니다. 노이즈 제거 루프는 세 가지 작업을 수행해야 한다는 점을 기억하세요:
 
-1. Set the scheduler's timesteps to use during denoising.
-2. Iterate over the timesteps.
-3. At each timestep, call the UNet model to predict the noise residual and pass it to the scheduler to compute the previous noisy sample.
+1. 노이즈 제거 중에 사용할 스케줄러의 timesteps를 설정합니다.
+2. timestep을 따라 반복합니다.
+3. 각 timestep에서 UNet 모델을 호출하여 noise residual을 예측하고 스케줄러에 전달하여 이전 노이즈 샘플을 계산합니다.
 
 ```py
 >>> from tqdm.auto import tqdm
@@ -240,54 +236,55 @@ The last step is to create the denoising loop that'll progressively transform th
 >>> scheduler.set_timesteps(num_inference_steps)
 
 >>> for t in tqdm(scheduler.timesteps):
-...     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
+...     # classifier-free guidance를 수행하는 경우 두번의 forward pass를 수행하지 않도록 latent를 확장.
 ...     latent_model_input = torch.cat([latents] * 2)
 
 ...     latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
 
-...     # predict the noise residual
+...     # noise residual 예측
 ...     with torch.no_grad():
 ...         noise_pred = unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
 
-...     # perform guidance
+...     # guidance 수행
 ...     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
 ...     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-...     # compute the previous noisy sample x_t -> x_t-1
+...     # 이전 노이즈 샘플을 계산 x_t -> x_t-1
 ...     latents = scheduler.step(noise_pred, t, latents).prev_sample
 ```
 
-### Decode the image
+### 이미지 디코딩
 
-The final step is to use the `vae` to decode the latent representation into an image and get the decoded output with `sample`:
+마지막 단계는 `vae`를 이용하여 잠재 표현을 이미지로 디코딩하고 `sample`과 함께 디코딩된 출력을 얻는 것입니다:
 
 ```py
-# scale and decode the image latents with vae
+# latent를 스케일링하고 vae로 이미지 디코딩
 latents = 1 / 0.18215 * latents
 with torch.no_grad():
     image = vae.decode(latents).sample
 ```
 
-Lastly, convert the image to a `PIL.Image` to see your generated image!
+마지막으로 이미지를 `PIL.Image`로 변환하면 생성된 이미지를 확인할 수 있습니다!
 
 ```py
->>> image = (image / 2 + 0.5).clamp(0, 1).squeeze()
->>> image = (image.permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
->>> image = Image.fromarray(image)
->>> image
+>>> image = (image / 2 + 0.5).clamp(0, 1)
+>>> image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
+>>> images = (image * 255).round().astype("uint8")
+>>> pil_images = [Image.fromarray(image) for image in images]
+>>> pil_images[0]
 ```
 
 <div class="flex justify-center">
     <img src="https://huggingface.co/blog/assets/98_stable_diffusion/stable_diffusion_k_lms.png"/>
 </div>
 
-## Next steps
+## 다음 단계
 
-From basic to complex pipelines, you've seen that all you really need to write your own diffusion system is a denoising loop. The loop should set the scheduler's timesteps, iterate over them, and alternate between calling the UNet model to predict the noise residual and passing it to the scheduler to compute the previous noisy sample.
+기본 파이프라인부터 복잡한 파이프라인까지, 자신만의 diffusion 시스템을 작성하는 데 필요한 것은 노이즈 제거 루프뿐이라는 것을 알 수 있었습니다. 이 루프는 스케줄러의 timesteps를 설정하고, 이를 반복하며, UNet 모델을 호출하여 noise residual을 예측하고 스케줄러에 전달하여 이전 노이즈 샘플을 계산하는 과정을 번갈아 가며 수행해야 합니다.
 
-This is really what 🧨 Diffusers is designed for: to make it intuitive and easy to write your own diffusion system using models and schedulers.
+이것이 바로 🧨 Diffusers가 설계된 목적입니다: 모델과 스케줄러를 사용해 자신만의 diffusion 시스템을 직관적이고 쉽게 작성할 수 있도록 하기 위해서입니다.
 
-For your next steps, feel free to:
+다음 단계를 자유롭게 진행하세요:
 
-* Learn how to [build and contribute a pipeline](../using-diffusers/contribute_pipeline) to 🧨 Diffusers. We can't wait and see what you'll come up with!
-* Explore [existing pipelines](fort-obsidian/diffusers/docs/source/en/api/pipelines/overview.md) in the library, and see if you can deconstruct and build a pipeline from scratch using the models and schedulers separately.
+* 🧨 Diffusers에 [파이프라인 구축 및 기여](using-diffusers/#contribute_pipeline)하는 방법을 알아보세요. 여러분이 어떤 아이디어를 내놓을지 기대됩니다!
+* 라이브러리에서 [기본 파이프라인](./api/pipelines/overview)을 살펴보고, 모델과 스케줄러를 별도로 사용하여 파이프라인을 처음부터 해체하고 빌드할 수 있는지 확인해 보세요.

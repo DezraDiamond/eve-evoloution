@@ -10,57 +10,53 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Evaluating Diffusion Models
+# Diffusion 모델 평가하기[[evaluating-diffusion-models]]
 
 <a target="_blank" href="https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/evaluation.ipynb">
     <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
-Evaluation of generative models like [Stable Diffusion](https://huggingface.co/docs/diffusers/stable_diffusion) is subjective in nature. But as practitioners and researchers, we often have to make careful choices amongst many different possibilities. So, when working with different generative models (like GANs, Diffusion, etc.), how do we choose one over the other?
+[Stable Diffusion](https://huggingface.co/docs/diffusers/stable_diffusion)와 같은 생성 모델의 평가는 주관적인 성격을 가지고 있습니다. 그러나 실무자와 연구자로서 우리는 종종 다양한 가능성 중에서 신중한 선택을 해야 합니다. 그래서 다양한 생성 모델 (GAN, Diffusion 등)을 사용할 때 어떻게 선택해야 할까요?
 
-Qualitative evaluation of such models can be error-prone and might incorrectly influence a decision.
-However, quantitative metrics don't necessarily correspond to image quality. So, usually, a combination
-of both qualitative and quantitative evaluations provides a stronger signal when choosing one model
-over the other.
+정성적인 평가는 모델의 이미지 품질에 대한 주관적인 평가이므로 오류가 발생할 수 있고 결정에 잘못된 영향을 미칠 수 있습니다. 반면, 정량적인 평가는 이미지 품질과 직접적인 상관관계를 갖지 않을 수 있습니다. 따라서 일반적으로 정성적 평가와 정량적 평가를 모두 고려하는 것이 더 강력한 신호를 제공하여 모델 선택에 도움이 됩니다.
 
-In this document, we provide a non-exhaustive overview of qualitative and quantitative methods to evaluate Diffusion models. For quantitative methods, we specifically focus on how to implement them alongside `diffusers`.
+이 문서에서는 Diffusion 모델을 평가하기 위한 정성적 및 정량적 방법에 대해 상세히 설명합니다. 정량적 방법에 대해서는 특히 `diffusers`와 함께 구현하는 방법에 초점을 맞추었습니다.
 
-The methods shown in this document can also be used to evaluate different [noise schedulers](https://huggingface.co/docs/diffusers/main/en/api/schedulers/overview) keeping the underlying generation model fixed.
+이 문서에서 보여진 방법들은 기반 생성 모델을 고정시키고 다양한 [노이즈 스케줄러](https://huggingface.co/docs/diffusers/main/en/api/schedulers/overview)를 평가하는 데에도 사용할 수 있습니다.
 
-## Scenarios
+## 시나리오[[scenarios]]
+다음과 같은 파이프라인을 사용하여 Diffusion 모델을 다룹니다:
 
-We cover Diffusion models with the following pipelines:
+- 텍스트로 안내된 이미지 생성 (예: [`StableDiffusionPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/text2img)).
+- 입력 이미지에 추가로 조건을 건 텍스트로 안내된 이미지 생성 (예: [`StableDiffusionImg2ImgPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/img2img) 및 [`StableDiffusionInstructPix2PixPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/pix2pix)).
+- 클래스 조건화된 이미지 생성 모델 (예: [`DiTPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/dit)).
 
-- Text-guided image generation (such as the [`StableDiffusionPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/text2img)).
-- Text-guided image generation, additionally conditioned on an input image (such as the [`StableDiffusionImg2ImgPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/img2img) and [`StableDiffusionInstructPix2PixPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/pix2pix)).
-- Class-conditioned image generation models (such as the [`DiTPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/dit)).
+## 정성적 평가[[qualitative-evaluation]]
 
-## Qualitative Evaluation
+정성적 평가는 일반적으로 생성된 이미지의 인간 평가를 포함합니다. 품질은 구성성, 이미지-텍스트 일치, 공간 관계 등과 같은 측면에서 측정됩니다. 일반적인 프롬프트는 주관적인 지표에 대한 일정한 기준을 제공합니다.
+DrawBench와 PartiPrompts는 정성적인 벤치마킹에 사용되는 프롬프트 데이터셋입니다. DrawBench와 PartiPrompts는 각각 [Imagen](https://imagen.research.google/)과 [Parti](https://parti.research.google/)에서 소개되었습니다.
 
-Qualitative evaluation typically involves human assessment of generated images. Quality is measured across aspects such as compositionality, image-text alignment, and spatial relations. Common prompts provide a degree of uniformity for subjective metrics.
-DrawBench and PartiPrompts are prompt datasets used for qualitative benchmarking. DrawBench and PartiPrompts were introduced by [Imagen](https://imagen.research.google/) and [Parti](https://parti.research.google/) respectively.
+[Parti 공식 웹사이트](https://parti.research.google/)에서 다음과 같이 설명하고 있습니다:
 
-From the [official Parti website](https://parti.research.google/):
-
-> PartiPrompts (P2) is a rich set of over 1600 prompts in English that we release as part of this work. P2 can be used to measure model capabilities across various categories and challenge aspects.
+> PartiPrompts (P2)는 이 작업의 일부로 공개되는 영어로 된 1600개 이상의 다양한 프롬프트 세트입니다. P2는 다양한 범주와 도전 측면에서 모델의 능력을 측정하는 데 사용할 수 있습니다.
 
 ![parti-prompts](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/parti-prompts.png)
 
-PartiPrompts has the following columns:
+PartiPrompts는 다음과 같은 열을 가지고 있습니다:
 
-- Prompt
-- Category of the prompt (such as “Abstract”, “World Knowledge”, etc.)
-- Challenge reflecting the difficulty (such as “Basic”, “Complex”, “Writing & Symbols”, etc.)
+- 프롬프트 (Prompt)
+- 프롬프트의 카테고리 (예: "Abstract", "World Knowledge" 등)
+- 난이도를 반영한 챌린지 (예: "Basic", "Complex", "Writing & Symbols" 등)
 
-These benchmarks allow for side-by-side human evaluation of different image generation models.
+이러한 벤치마크는 서로 다른 이미지 생성 모델을 인간 평가로 비교할 수 있도록 합니다.
 
-For this, the 🧨 Diffusers team has built **Open Parti Prompts**, which is a community-driven qualitative benchmark based on Parti Prompts to compare state-of-the-art open-source diffusion models:
-- [Open Parti Prompts Game](https://huggingface.co/spaces/OpenGenAI/open-parti-prompts): For 10 parti prompts, 4 generated images are shown and the user selects the image that suits the prompt best.
-- [Open Parti Prompts Leaderboard](https://huggingface.co/spaces/OpenGenAI/parti-prompts-leaderboard): The leaderboard comparing the currently best open-sourced diffusion models to each other.
+이를 위해 🧨 Diffusers 팀은 **Open Parti Prompts**를 구축했습니다. 이는 Parti Prompts를 기반으로 한 커뮤니티 기반의 질적 벤치마크로, 최첨단 오픈 소스 확산 모델을 비교하는 데 사용됩니다:
+- [Open Parti Prompts 게임](https://huggingface.co/spaces/OpenGenAI/open-parti-prompts): 10개의 parti prompt에 대해 4개의 생성된 이미지가 제시되며, 사용자는 프롬프트에 가장 적합한 이미지를 선택합니다.
+- [Open Parti Prompts 리더보드](https://huggingface.co/spaces/OpenGenAI/parti-prompts-leaderboard): 현재 최고의 오픈 소스 diffusion 모델들을 서로 비교하는 리더보드입니다.
 
-To manually compare images, let’s see how we can use `diffusers` on a couple of PartiPrompts.
+이미지를 수동으로 비교하려면, `diffusers`를 사용하여 몇가지 PartiPrompts를 어떻게 활용할 수 있는지 알아봅시다.
 
-Below we show some prompts sampled across different challenges: Basic, Complex, Linguistic Structures, Imagination, and Writing & Symbols. Here we are using PartiPrompts as a [dataset](https://huggingface.co/datasets/nateraw/parti-prompts).
+다음은 몇 가지 다른 도전에서 샘플링한 프롬프트를 보여줍니다: Basic, Complex, Linguistic Structures, Imagination, Writing & Symbols. 여기서는 PartiPrompts를 [데이터셋](https://huggingface.co/datasets/nateraw/parti-prompts)으로 사용합니다.
 
 ```python
 from datasets import load_dataset
@@ -78,8 +74,7 @@ sample_prompts = [
     'The saying "BE EXCELLENT TO EACH OTHER" written on a red brick wall with a graffiti image of a green alien wearing a tuxedo. A yellow fire hydrant is on a sidewalk in the foreground.',
 ]
 ```
-
-Now we can use these prompts to generate some images using Stable Diffusion ([v1-4 checkpoint](https://huggingface.co/CompVis/stable-diffusion-v1-4)):
+이제 이런 프롬프트를 사용하여 Stable Diffusion ([v1-4 checkpoint](https://huggingface.co/CompVis/stable-diffusion-v1-4))를 사용한 이미지 생성을 할 수 있습니다 :
 
 ```python
 import torch
@@ -92,34 +87,33 @@ images = sd_pipeline(sample_prompts, num_images_per_prompt=1, generator=generato
 
 ![parti-prompts-14](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/parti-prompts-14.png)
 
-We can also set `num_images_per_prompt` accordingly to compare different images for the same prompt. Running the same pipeline but with a different checkpoint ([v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5)), yields:
+
+`num_images_per_prompt`를 설정하여 동일한 프롬프트에 대해 다른 이미지를 비교할 수도 있습니다. 다른 체크포인트([v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5))로 동일한 파이프라인을 실행하면 다음과 같은 결과가 나옵니다:
 
 ![parti-prompts-15](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/parti-prompts-15.png)
 
-Once several images are generated from all the prompts using multiple models (under evaluation), these results are presented to human evaluators for scoring. For
-more details on the DrawBench and PartiPrompts benchmarks, refer to their respective papers.
+
+다양한 모델을 사용하여 모든 프롬프트에서 생성된 여러 이미지들이 생성되면 (평가 과정에서) 이러한 결과물들은 사람 평가자들에게 점수를 매기기 위해 제시됩니다. DrawBench와 PartiPrompts 벤치마크에 대한 자세한 내용은 각각의 논문을 참조하십시오.
 
 <Tip>
 
-It is useful to look at some inference samples while a model is training to measure the
-training progress. In our [training scripts](https://github.com/huggingface/diffusers/tree/main/examples/), we support this utility with additional support for
-logging to TensorBoard and Weights & Biases.
+모델이 훈련 중일 때 추론 샘플을 살펴보는 것은 훈련 진행 상황을 측정하는 데 유용합니다. [훈련 스크립트](https://github.com/huggingface/diffusers/tree/main/examples/)에서는 TensorBoard와 Weights & Biases에 대한 추가 지원과 함께 이 유틸리티를 지원합니다.
 
 </Tip>
 
-## Quantitative Evaluation
+## 정량적 평가[[quantitative-evaluation]]
 
-In this section, we will walk you through how to evaluate three different diffusion pipelines using:
+이 섹션에서는 세 가지 다른 확산 파이프라인을 평가하는 방법을 안내합니다:
 
-- CLIP score
-- CLIP directional similarity
+- CLIP 점수
+- CLIP 방향성 유사도
 - FID
 
-### Text-guided image generation
+### 텍스트 안내 이미지 생성[[text-guided-image-generation]]
 
-[CLIP score](https://arxiv.org/abs/2104.08718) measures the compatibility of image-caption pairs. Higher CLIP scores imply higher compatibility 🔼. The CLIP score is a quantitative measurement of the qualitative concept "compatibility". Image-caption pair compatibility can also be thought of as the semantic similarity between the image and the caption. CLIP score was found to have high correlation with human judgement.
+[CLIP 점수](https://arxiv.org/abs/2104.08718)는 이미지-캡션 쌍의 호환성을 측정합니다. 높은 CLIP 점수는 높은 호환성🔼을 나타냅니다. CLIP 점수는 이미지와 캡션 사이의 의미적 유사성으로 생각할 수도 있습니다. CLIP 점수는 인간 판단과 높은 상관관계를 가지고 있습니다.
 
-Let's first load a [`StableDiffusionPipeline`]:
+[`StableDiffusionPipeline`]을 일단 로드해봅시다:
 
 ```python
 from diffusers import StableDiffusionPipeline
@@ -129,7 +123,7 @@ model_ckpt = "CompVis/stable-diffusion-v1-4"
 sd_pipeline = StableDiffusionPipeline.from_pretrained(model_ckpt, torch_dtype=torch.float16).to("cuda")
 ```
 
-Generate some images with multiple prompts:
+여러 개의 프롬프트를 사용하여 이미지를 생성합니다:
 
 ```python
 prompts = [
@@ -147,7 +141,7 @@ print(images.shape)
 # (6, 512, 512, 3)
 ```
 
-And then, we calculate the CLIP score.
+그러고 나서 CLIP 점수를 계산합니다.
 
 ```python
 from torchmetrics.functional.multimodal import clip_score
@@ -165,10 +159,9 @@ print(f"CLIP score: {sd_clip_score}")
 # CLIP score: 35.7038
 ```
 
-In the above example, we generated one image per prompt. If we generated multiple images per prompt, we would have to take the average score from the generated images per prompt.
+위의 예제에서는 각 프롬프트 당 하나의 이미지를 생성했습니다. 만약 프롬프트 당 여러 이미지를 생성한다면, 프롬프트 당 생성된 이미지의 평균 점수를 사용해야 합니다.
 
-Now, if we wanted to compare two checkpoints compatible with the [`StableDiffusionPipeline`] we should pass a generator while calling the pipeline. First, we generate images with a
-fixed seed with the [v1-4 Stable Diffusion checkpoint](https://huggingface.co/CompVis/stable-diffusion-v1-4):
+이제 [`StableDiffusionPipeline`]과 호환되는 두 개의 체크포인트를 비교하려면, 파이프라인을 호출할 때 generator를 전달해야 합니다. 먼저, 고정된 시드로 [v1-4 Stable Diffusion 체크포인트](https://huggingface.co/CompVis/stable-diffusion-v1-4)를 사용하여 이미지를 생성합니다:
 
 ```python
 seed = 0
@@ -177,7 +170,7 @@ generator = torch.manual_seed(seed)
 images = sd_pipeline(prompts, num_images_per_prompt=1, generator=generator, output_type="np").images
 ```
 
-Then we load the [v1-5 checkpoint](https://huggingface.co/runwayml/stable-diffusion-v1-5) to generate images:
+그런 다음 [v1-5 checkpoint](https://huggingface.co/runwayml/stable-diffusion-v1-5)를 로드하여 이미지를 생성합니다:
 
 ```python
 model_ckpt_1_5 = "runwayml/stable-diffusion-v1-5"
@@ -186,7 +179,7 @@ sd_pipeline_1_5 = StableDiffusionPipeline.from_pretrained(model_ckpt_1_5, torch_
 images_1_5 = sd_pipeline_1_5(prompts, num_images_per_prompt=1, generator=generator, output_type="np").images
 ```
 
-And finally, we compare their CLIP scores:
+그리고 마지막으로 CLIP 점수를 비교합니다:
 
 ```python
 sd_clip_score_1_4 = calculate_clip_score(images, prompts)
@@ -198,35 +191,32 @@ print(f"CLIP Score with v-1-5: {sd_clip_score_1_5}")
 # CLIP Score with v-1-5: 36.2137
 ```
 
-It seems like the [v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) checkpoint performs better than its predecessor. Note, however, that the number of prompts we used to compute the CLIP scores is quite low. For a more practical evaluation, this number should be way higher, and the prompts should be diverse.
+[v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) 체크포인트가 이전 버전보다 더 나은 성능을 보이는 것 같습니다. 그러나 CLIP 점수를 계산하기 위해 사용한 프롬프트의 수가 상당히 적습니다. 보다 실용적인 평가를 위해서는 이 수를 훨씬 높게 설정하고, 프롬프트를 다양하게 사용해야 합니다.
 
 <Tip warning={true}>
 
-By construction, there are some limitations in this score. The captions in the training dataset
-were crawled from the web and extracted from `alt` and similar tags associated an image on the internet.
-They are not necessarily representative of what a human being would use to describe an image. Hence we
-had to "engineer" some prompts here.
+이 점수에는 몇 가지 제한 사항이 있습니다. 훈련 데이터셋의 캡션은 웹에서 크롤링되어 이미지와 관련된 `alt` 및 유사한 태그에서 추출되었습니다. 이들은 인간이 이미지를 설명하는 데 사용할 수 있는 것과 일치하지 않을 수 있습니다. 따라서 여기서는 몇 가지 프롬프트를 "엔지니어링"해야 했습니다.
 
 </Tip>
 
-### Image-conditioned text-to-image generation
+### 이미지 조건화된 텍스트-이미지 생성[[image-conditioned-text-to-image-generation]]
 
-In this case, we condition the generation pipeline with an input image as well as a text prompt. Let's take the [`StableDiffusionInstructPix2PixPipeline`], as an example. It takes an edit instruction as an input prompt and an input image to be edited.
+이 경우, 생성 파이프라인을 입력 이미지와 텍스트 프롬프트로 조건화합니다. [`StableDiffusionInstructPix2PixPipeline`]을 예로 들어보겠습니다. 이는 편집 지시문을 입력 프롬프트로 사용하고 편집할 입력 이미지를 사용합니다.
 
-Here is one example:
+다음은 하나의 예시입니다:
 
 ![edit-instruction](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/edit-instruction.png)
 
-One strategy to evaluate such a model is to measure the consistency of the change between the two images (in [CLIP](https://huggingface.co/docs/transformers/model_doc/clip) space) with the change between the two image captions (as shown in [CLIP-Guided Domain Adaptation of Image Generators](https://arxiv.org/abs/2108.00946)). This is referred to as the "**CLIP directional similarity**".
+모델을 평가하는 한 가지 전략은 두 이미지 캡션 간의 변경과([CLIP-Guided Domain Adaptation of Image Generators](https://arxiv.org/abs/2108.00946)에서 보여줍니다) 함께 두 이미지 사이의 변경의 일관성을 측정하는 것입니다 ([CLIP](https://huggingface.co/docs/transformers/model_doc/clip) 공간에서). 이를 "**CLIP 방향성 유사성**"이라고 합니다.
 
-- Caption 1 corresponds to the input image (image 1) that is to be edited.
-- Caption 2 corresponds to the edited image (image 2). It should reflect the edit instruction.
+- 캡션 1은 편집할 이미지 (이미지 1)에 해당합니다.
+- 캡션 2는 편집된 이미지 (이미지 2)에 해당합니다. 편집 지시를 반영해야 합니다.
 
-Following is a pictorial overview:
+다음은 그림으로 된 개요입니다:
 
 ![edit-consistency](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/edit-consistency.png)
 
-We have prepared a mini dataset to implement this metric. Let's first load the dataset.
+우리는 이 측정 항목을 구현하기 위해 미니 데이터 세트를 준비했습니다. 먼저 데이터 세트를 로드해 보겠습니다.
 
 ```python
 from datasets import load_dataset
@@ -242,13 +232,13 @@ dataset.features
  'image': Image(decode=True, id=None)}
 ```
 
-Here we have:
+여기에는 다음과 같은 항목이 있습니다:
 
-- `input` is a caption corresponding to the `image`.
-- `edit` denotes the edit instruction.
-- `output` denotes the modified caption reflecting the `edit` instruction.
+- `input`은 `image`에 해당하는 캡션입니다.
+- `edit`은 편집 지시사항을 나타냅니다.
+- `output`은 `edit` 지시사항을 반영한 수정된 캡션입니다.
 
-Let's take a look at a sample.
+샘플을 살펴보겠습니다.
 
 ```python
 idx = 0
@@ -263,7 +253,7 @@ Edit instruction: make the isles all white marble
 Modified caption: 2. WHITE MARBLE ISLANDS: An archipelago of 18 mountainous white marble isles in the North Atlantic Ocean between Norway and Iceland, the White Marble Islands has 'everything you could hope for', according to Big 7 Travel. It boasts 'crystal clear waterfalls, rocky cliffs that seem to jut out of nowhere and velvety green hills'
 ```
 
-And here is the image:
+다음은 이미지입니다:
 
 ```python
 dataset[idx]["image"]
@@ -271,9 +261,9 @@ dataset[idx]["image"]
 
 ![edit-dataset](https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/edit-dataset.png)
 
-We will first edit the images of our dataset with the edit instruction and compute the directional similarity.
+먼저 편집 지시사항을 사용하여 데이터 세트의 이미지를 편집하고 방향 유사도를 계산합니다.
 
-Let's first load the [`StableDiffusionInstructPix2PixPipeline`]:
+[`StableDiffusionInstructPix2PixPipeline`]를 먼저 로드합니다:
 
 ```python
 from diffusers import StableDiffusionInstructPix2PixPipeline
@@ -283,7 +273,7 @@ instruct_pix2pix_pipeline = StableDiffusionInstructPix2PixPipeline.from_pretrain
 ).to(device)
 ```
 
-Now, we perform the edits:
+이제 편집을 수행합니다:
 
 ```python
 import numpy as np
@@ -313,8 +303,7 @@ for idx in range(len(dataset)):
     modified_captions.append(dataset[idx]["output"])
     edited_images.append(edited_image)
 ```
-
-To measure the directional similarity, we first load CLIP's image and text encoders:
+방향 유사도를 계산하기 위해서는 먼저 CLIP의 이미지와 텍스트 인코더를 로드합니다:
 
 ```python
 from transformers import (
@@ -331,9 +320,9 @@ image_processor = CLIPImageProcessor.from_pretrained(clip_id)
 image_encoder = CLIPVisionModelWithProjection.from_pretrained(clip_id).to(device)
 ```
 
-Notice that we are using a particular CLIP checkpoint, i.e., `openai/clip-vit-large-patch14`. This is because the Stable Diffusion pre-training was performed with this CLIP variant. For more details, refer to the [documentation](https://huggingface.co/docs/transformers/model_doc/clip).
+주목할 점은 특정한 CLIP 체크포인트인 `openai/clip-vit-large-patch14`를 사용하고 있다는 것입니다. 이는 Stable Diffusion 사전 훈련이 이 CLIP 변형체와 함께 수행되었기 때문입니다. 자세한 내용은 [문서](https://huggingface.co/docs/transformers/model_doc/clip)를 참조하세요.
 
-Next, we prepare a PyTorch `nn.Module` to compute directional similarity:
+다음으로, 방향성 유사도를 계산하기 위해 PyTorch의 `nn.Module`을 준비합니다:
 
 ```python
 import torch.nn as nn
@@ -389,7 +378,7 @@ class DirectionalSimilarity(nn.Module):
         return directional_similarity
 ```
 
-Let's put `DirectionalSimilarity` to use now.
+이제 `DirectionalSimilarity`를 사용해 보겠습니다.
 
 ```python
 dir_similarity = DirectionalSimilarity(tokenizer, text_encoder, image_processor, image_encoder)
@@ -408,35 +397,35 @@ print(f"CLIP directional similarity: {np.mean(scores)}")
 # CLIP directional similarity: 0.0797976553440094
 ```
 
-Like the CLIP Score, the higher the CLIP directional similarity, the better it is.
+CLIP 점수와 마찬가지로, CLIP 방향 유사성이 높을수록 좋습니다.
 
-It should be noted that the `StableDiffusionInstructPix2PixPipeline` exposes two arguments, namely, `image_guidance_scale` and `guidance_scale` that let you control the quality of the final edited image. We encourage you to experiment with these two arguments and see the impact of that on the directional similarity.
+`StableDiffusionInstructPix2PixPipeline`은 `image_guidance_scale`과 `guidance_scale`이라는 두 가지 인자를 노출시킵니다. 이 두 인자를 조정하여 최종 편집된 이미지의 품질을 제어할 수 있습니다. 이 두 인자의 영향을 실험해보고 방향 유사성에 미치는 영향을 확인해보기를 권장합니다.
 
-We can extend the idea of this metric to measure how similar the original image and edited version are. To do that, we can just do `F.cosine_similarity(img_feat_two, img_feat_one)`. For these kinds of edits, we would still want the primary semantics of the images to be preserved as much as possible, i.e., a high similarity score.
+이러한 메트릭의 개념을 확장하여 원본 이미지와 편집된 버전의 유사성을 측정할 수 있습니다. 이를 위해 `F.cosine_similarity(img_feat_two, img_feat_one)`을 사용할 수 있습니다. 이러한 종류의 편집에서는 이미지의 주요 의미가 최대한 보존되어야 합니다. 즉, 높은 유사성 점수를 얻어야 합니다.
 
-We can use these metrics for similar pipelines such as the [`StableDiffusionPix2PixZeroPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/pix2pix_zero#diffusers.StableDiffusionPix2PixZeroPipeline).
+[`StableDiffusionPix2PixZeroPipeline`](https://huggingface.co/docs/diffusers/main/en/api/pipelines/pix2pix_zero#diffusers.StableDiffusionPix2PixZeroPipeline)와 같은 유사한 파이프라인에도 이러한 메트릭을 사용할 수 있습니다.
 
 <Tip>
 
-Both CLIP score and CLIP direction similarity rely on the CLIP model, which can make the evaluations biased.
+CLIP 점수와 CLIP 방향 유사성 모두 CLIP 모델에 의존하기 때문에 평가가 편향될 수 있습니다
 
 </Tip>
 
-***Extending metrics like IS, FID (discussed later), or KID can be difficult*** when the model under evaluation was pre-trained on a large image-captioning dataset (such as the [LAION-5B dataset](https://laion.ai/blog/laion-5b/)). This is because underlying these metrics is an InceptionNet (pre-trained on the ImageNet-1k dataset) used for extracting intermediate image features. The pre-training dataset of Stable Diffusion may have limited overlap with the pre-training dataset of InceptionNet, so it is not a good candidate here for feature extraction.
+***IS, FID (나중에 설명할 예정), 또는 KID와 같은 메트릭을 확장하는 것은 어려울 수 있습니다***. 평가 중인 모델이 대규모 이미지 캡셔닝 데이터셋 (예: [LAION-5B 데이터셋](https://laion.ai/blog/laion-5b/))에서 사전 훈련되었을 때 이는 문제가 될 수 있습니다. 왜냐하면 이러한 메트릭의 기반에는 중간 이미지 특징을 추출하기 위해 ImageNet-1k 데이터셋에서 사전 훈련된 InceptionNet이 사용되기 때문입니다. Stable Diffusion의 사전 훈련 데이터셋은 InceptionNet의 사전 훈련 데이터셋과 겹치는 부분이 제한적일 수 있으므로 따라서 여기에는 좋은 후보가 아닙니다.
 
-***Using the above metrics helps evaluate models that are class-conditioned. For example, [DiT](https://huggingface.co/docs/diffusers/main/en/api/pipelines/dit). It was pre-trained being conditioned on the ImageNet-1k classes.***
+***위의 메트릭을 사용하면 클래스 조건이 있는 모델을 평가할 수 있습니다. 예를 들어, [DiT](https://huggingface.co/docs/diffusers/main/en/api/pipelines/dit). 이는 ImageNet-1k 클래스에 조건을 걸고 사전 훈련되었습니다.***
 
-### Class-conditioned image generation
+### 클래스 조건화 이미지 생성[[class-conditioned-image-generation]]
 
-Class-conditioned generative models are usually pre-trained on a class-labeled dataset such as [ImageNet-1k](https://huggingface.co/datasets/imagenet-1k). Popular metrics for evaluating these models include Fréchet Inception Distance (FID), Kernel Inception Distance (KID), and Inception Score (IS). In this document, we focus on FID ([Heusel et al.](https://arxiv.org/abs/1706.08500)). We show how to compute it with the [`DiTPipeline`](https://huggingface.co/docs/diffusers/api/pipelines/dit), which uses the [DiT model](https://arxiv.org/abs/2212.09748) under the hood.
+클래스 조건화 생성 모델은 일반적으로 [ImageNet-1k](https://huggingface.co/datasets/imagenet-1k)와 같은 클래스 레이블이 지정된 데이터셋에서 사전 훈련됩니다. 이러한 모델을 평가하는 인기있는 지표에는 Fréchet Inception Distance (FID), Kernel Inception Distance (KID) 및 Inception Score (IS)가 있습니다. 이 문서에서는 FID ([Heusel et al.](https://arxiv.org/abs/1706.08500))에 초점을 맞추고 있습니다. [`DiTPipeline`](https://huggingface.co/docs/diffusers/api/pipelines/dit)을 사용하여 FID를 계산하는 방법을 보여줍니다. 이는 내부적으로 [DiT 모델](https://arxiv.org/abs/2212.09748)을 사용합니다.
 
-FID aims to measure how similar are two datasets of images. As per [this resource](https://mmgeneration.readthedocs.io/en/latest/quick_run.html#fid):
+FID는 두 개의 이미지 데이터셋이 얼마나 유사한지를 측정하는 것을 목표로 합니다. [이 자료](https://mmgeneration.readthedocs.io/en/latest/quick_run.html#fid)에 따르면:
 
-> Fréchet Inception Distance is a measure of similarity between two datasets of images. It was shown to correlate well with the human judgment of visual quality and is most often used to evaluate the quality of samples of Generative Adversarial Networks. FID is calculated by computing the Fréchet distance between two Gaussians fitted to feature representations of the Inception network.
+> Fréchet Inception Distance는 두 개의 이미지 데이터셋 간의 유사성을 측정하는 지표입니다. 시각적 품질에 대한 인간 판단과 잘 상관되는 것으로 나타났으며, 주로 생성적 적대 신경망의 샘플 품질을 평가하는 데 사용됩니다. FID는 Inception 네트워크의 특징 표현에 맞게 적합한 두 개의 가우시안 사이의 Fréchet 거리를 계산하여 구합니다.
 
-These two datasets are essentially the dataset of real images and the dataset of fake images (generated images in our case). FID is usually calculated with two large datasets. However, for this document, we will work with two mini datasets.
+이 두 개의 데이터셋은 실제 이미지 데이터셋과 가짜 이미지 데이터셋(우리의 경우 생성된 이미지)입니다. FID는 일반적으로 두 개의 큰 데이터셋으로 계산됩니다. 그러나 이 문서에서는 두 개의 미니 데이터셋으로 작업할 것입니다.
 
-Let's first download a few images from the ImageNet-1k training set:
+먼저 ImageNet-1k 훈련 세트에서 몇 개의 이미지를 다운로드해 봅시다:
 
 ```python
 from zipfile import ZipFile
@@ -466,14 +455,14 @@ image_paths = sorted([os.path.join(dataset_path, x) for x in os.listdir(dataset_
 real_images = [np.array(Image.open(path).convert("RGB")) for path in image_paths]
 ```
 
-These are 10 images from the following ImageNet-1k classes: "cassette_player", "chain_saw" (x2), "church", "gas_pump" (x3), "parachute" (x2), and "tench".
+다음은 ImageNet-1k classes의 이미지 10개입니다 : "cassette_player", "chain_saw" (x2), "church", "gas_pump" (x3), "parachute" (x2), 그리고 "tench".
 
 <p align="center">
     <img src="https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/real-images.png" alt="real-images"><br>
     <em>Real images.</em>
 </p>
 
-Now that the images are loaded, let's apply some lightweight pre-processing on them to use them for FID calculation.
+이제 이미지가 로드되었으므로 이미지에 가벼운 전처리를 적용하여 FID 계산에 사용해 보겠습니다.
 
 ```python
 from torchvision.transforms import functional as F
@@ -489,7 +478,7 @@ print(real_images.shape)
 # torch.Size([10, 3, 256, 256])
 ```
 
-We now load the [`DiTPipeline`](https://huggingface.co/docs/diffusers/api/pipelines/dit) to generate images conditioned on the above-mentioned classes.
+이제 위에서 언급한 클래스에 따라 조건화 된 이미지를 생성하기 위해 [`DiTPipeline`](https://huggingface.co/docs/diffusers/api/pipelines/dit)를 로드합니다.
 
 ```python
 from diffusers import DiTPipeline, DPMSolverMultistepScheduler
@@ -521,7 +510,7 @@ print(fake_images.shape)
 # torch.Size([10, 3, 256, 256])
 ```
 
-Now, we can compute the FID using [`torchmetrics`](https://torchmetrics.readthedocs.io/).
+이제 [`torchmetrics`](https://torchmetrics.readthedocs.io/)를 사용하여 FID를 계산할 수 있습니다.
 
 ```python
 from torchmetrics.image.fid import FrechetInceptionDistance
@@ -534,32 +523,30 @@ print(f"FID: {float(fid.compute())}")
 # FID: 177.7147216796875
 ```
 
-The lower the FID, the better it is. Several things can influence FID here:
+FID는 낮을수록 좋습니다. 여러 가지 요소가 FID에 영향을 줄 수 있습니다:
 
-- Number of images (both real and fake)
-- Randomness induced in the diffusion process
-- Number of inference steps in the diffusion process
-- The scheduler being used in the diffusion process
+- 이미지의 수 (실제 이미지와 가짜 이미지 모두)
+- diffusion 과정에서 발생하는 무작위성
+- diffusion 과정에서의 추론 단계 수
+- diffusion 과정에서 사용되는 스케줄러
 
-For the last two points, it is, therefore, a good practice to run the evaluation across different seeds and inference steps, and then report an average result.
+마지막 두 가지 요소에 대해서는, 다른 시드와 추론 단계에서 평가를 실행하고 평균 결과를 보고하는 것은 좋은 실천 방법입니다
 
 <Tip warning={true}>
 
-FID results tend to be fragile as they depend on a lot of factors:
+FID 결과는 많은 요소에 의존하기 때문에 취약할 수 있습니다:
 
-* The specific Inception model used during computation.
-* The implementation accuracy of the computation.
-* The image format (not the same if we start from PNGs vs JPGs).
+* 계산 중 사용되는 특정 Inception 모델.
+* 계산의 구현 정확도.
+* 이미지 형식 (PNG 또는 JPG에서 시작하는 경우가 다릅니다).
 
-Keeping that in mind, FID is often most useful when comparing similar runs, but it is
-hard to reproduce paper results unless the authors carefully disclose the FID
-measurement code.
+이러한 사항을 염두에 두면, FID는 유사한 실행을 비교할 때 가장 유용하지만, 저자가 FID 측정 코드를 주의 깊게 공개하지 않는 한 논문 결과를 재현하기는 어렵습니다.
 
-These points apply to other related metrics too, such as KID and IS.
+이러한 사항은 KID 및 IS와 같은 다른 관련 메트릭에도 적용됩니다.
 
 </Tip>
 
-As a final step, let's visually inspect the `fake_images`.
+마지막 단계로, `fake_images`를 시각적으로 검사해 봅시다.
 
 <p align="center">
     <img src="https://huggingface.co/datasets/diffusers/docs-images/resolve/main/evaluation_diffusion_models/fake-images.png" alt="fake-images"><br>

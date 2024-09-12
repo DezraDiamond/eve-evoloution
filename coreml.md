@@ -10,45 +10,45 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# How to run Stable Diffusion with Core ML
+# Core ML로 Stable Diffusion을 실행하는 방법
 
-[Core ML](https://developer.apple.com/documentation/coreml) is the model format and machine learning library supported by Apple frameworks. If you are interested in running Stable Diffusion models inside your macOS or iOS/iPadOS apps, this guide will show you how to convert existing PyTorch checkpoints into the Core ML format and use them for inference with Python or Swift.
+[Core ML](https://developer.apple.com/documentation/coreml)은 Apple 프레임워크에서 지원하는 모델 형식 및 머신 러닝 라이브러리입니다. macOS 또는 iOS/iPadOS 앱 내에서 Stable Diffusion 모델을 실행하는 데 관심이 있는 경우, 이 가이드에서는 기존 PyTorch 체크포인트를 Core ML 형식으로 변환하고 이를 Python 또는 Swift로 추론에 사용하는 방법을 설명합니다.
 
-Core ML models can leverage all the compute engines available in Apple devices: the CPU, the GPU, and the Apple Neural Engine (or ANE, a tensor-optimized accelerator available in Apple Silicon Macs and modern iPhones/iPads). Depending on the model and the device it's running on, Core ML can mix and match compute engines too, so some portions of the model may run on the CPU while others run on GPU, for example.
+Core ML 모델은 Apple 기기에서 사용할 수 있는 모든 컴퓨팅 엔진들, 즉 CPU, GPU, Apple Neural Engine(또는 Apple Silicon Mac 및 최신 iPhone/iPad에서 사용할 수 있는 텐서 최적화 가속기인 ANE)을 활용할 수 있습니다. 모델과 실행 중인 기기에 따라 Core ML은 컴퓨팅 엔진도 혼합하여 사용할 수 있으므로, 예를 들어 모델의 일부가 CPU에서 실행되는 반면 다른 부분은 GPU에서 실행될 수 있습니다.
 
 <Tip>
 
-You can also run the `diffusers` Python codebase on Apple Silicon Macs using the `mps` accelerator built into PyTorch. This approach is explained in depth in [the mps guide](fort-obsidian/diffusers/docs/source/en/optimization/mps.md), but it is not compatible with native apps.
+PyTorch에 내장된 `mps` 가속기를 사용하여 Apple Silicon Macs에서 `diffusers` Python 코드베이스를 실행할 수도 있습니다. 이 방법은 [mps 가이드]에 자세히 설명되어 있지만 네이티브 앱과 호환되지 않습니다.
 
 </Tip>
 
-## Stable Diffusion Core ML Checkpoints
+## Stable Diffusion Core ML 체크포인트
 
-Stable Diffusion weights (or checkpoints) are stored in the PyTorch format, so you need to convert them to the Core ML format before we can use them inside native apps.
+Stable Diffusion 가중치(또는 체크포인트)는 PyTorch 형식으로 저장되기 때문에 네이티브 앱에서 사용하기 위해서는 Core ML 형식으로 변환해야 합니다.
 
-Thankfully, Apple engineers developed [a conversion tool](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml) based on `diffusers` to convert the PyTorch checkpoints to Core ML.
+다행히도 Apple 엔지니어들이 `diffusers`를 기반으로 한 [변환 툴](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml)을 개발하여 PyTorch 체크포인트를 Core ML로 변환할 수 있습니다.
 
-Before you convert a model, though, take a moment to explore the Hugging Face Hub – chances are the model you're interested in is already available in Core ML format:
+모델을 변환하기 전에 잠시 시간을 내어 Hugging Face Hub를 살펴보세요. 관심 있는 모델이 이미 Core ML 형식으로 제공되고 있을 가능성이 높습니다:
 
-- the [Apple](https://huggingface.co/apple) organization includes Stable Diffusion versions 1.4, 1.5, 2.0 base, and 2.1 base
-- [coreml community](https://huggingface.co/coreml-community) includes custom finetuned models
-- use this [filter](https://huggingface.co/models?pipeline_tag=text-to-image&library=coreml&p=2&sort=likes) to return all available Core ML checkpoints
+- [Apple](https://huggingface.co/apple) organization에는 Stable Diffusion 버전 1.4, 1.5, 2.0 base 및 2.1 base가 포함되어 있습니다.
+- [coreml](https://huggingface.co/coreml) organization에는 커스텀 DreamBooth가 적용되거나, 파인튜닝된 모델이 포함되어 있습니다.
+- 이 [필터](https://huggingface.co/models?pipeline_tag=text-to-image&library=coreml&p=2&sort=likes)를 사용하여 사용 가능한 모든 Core ML 체크포인트들을 반환합니다.
 
-If you can't find the model you're interested in, we recommend you follow the instructions for [Converting Models to Core ML](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml) by Apple.
+원하는 모델을 찾을 수 없는 경우 Apple의 [모델을 Core ML로 변환하기](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml) 지침을 따르는 것이 좋습니다.
 
-## Selecting the Core ML Variant to Use
+## 사용할 Core ML 변형(Variant) 선택하기
 
-Stable Diffusion models can be converted to different Core ML variants intended for different purposes:
+Stable Diffusion 모델은 다양한 목적에 따라 다른 Core ML 변형으로 변환할 수 있습니다:
 
-- The type of attention blocks used. The attention operation is used to "pay attention" to the relationship between different areas in the image representations and to understand how the image and text representations are related. Attention is compute- and memory-intensive, so different implementations exist that consider the hardware characteristics of different devices. For Core ML Stable Diffusion models, there are two attention variants:
-    * `split_einsum` ([introduced by Apple](https://machinelearning.apple.com/research/neural-engine-transformers)) is optimized for ANE devices, which is available in modern iPhones, iPads and M-series computers.
-    * The "original" attention (the base implementation used in `diffusers`) is only compatible with CPU/GPU and not ANE. It can be *faster* to run your model on CPU + GPU using `original` attention than ANE. See [this performance benchmark](https://huggingface.co/blog/fast-mac-diffusers#performance-benchmarks) as well as some [additional measures provided by the community](https://github.com/huggingface/swift-coreml-diffusers/issues/31) for additional details.
+- 사용되는 어텐션 블록 유형. 어텐션 연산은 이미지 표현의 여러 영역 간의 관계에 '주의를 기울이고' 이미지와 텍스트 표현이 어떻게 연관되어 있는지 이해하는 데 사용됩니다. 어텐션 연산은 컴퓨팅 및 메모리 집약적이므로 다양한 장치의 하드웨어 특성을 고려한 다양한 구현이 존재합니다. Core ML Stable Diffusion 모델의 경우 두 가지 주의 변형이 있습니다:
+    * `split_einsum` ([Apple에서 도입](https://machinelearning.apple.com/research/neural-engine-transformers)은 최신 iPhone, iPad 및 M 시리즈 컴퓨터에서 사용할 수 있는 ANE 장치에 최적화되어 있습니다.
+    * "원본" 어텐션(`diffusers`에 사용되는 기본 구현)는 CPU/GPU와만 호환되며 ANE와는 호환되지 않습니다. "원본" 어텐션을 사용하여 CPU + GPU에서 모델을 실행하는 것이 ANE보다 *더* 빠를 수 있습니다. 자세한 내용은 [이 성능 벤치마크](https://huggingface.co/blog/fast-mac-diffusers#performance-benchmarks)와 커뮤니티에서 제공하는 일부 [추가 측정](https://github.com/huggingface/swift-coreml-diffusers/issues/31)을 참조하십시오.
 
-- The supported inference framework.
-    * `packages` are suitable for Python inference. This can be used to test converted Core ML models before attempting to integrate them inside native apps, or if you want to explore Core ML performance but don't need to support native apps. For example, an application with a web UI could perfectly use a Python Core ML backend.
-    * `compiled` models are required for Swift code. The `compiled` models in the Hub split the large UNet model weights into several files for compatibility with iOS and iPadOS devices. This corresponds to the [`--chunk-unet` conversion option](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml). If you want to support native apps, then you need to select the `compiled` variant.
+- 지원되는 추론 프레임워크
+    * `packages`는 Python 추론에 적합합니다. 네이티브 앱에 통합하기 전에 변환된 Core ML 모델을 테스트하거나, Core ML 성능을 알고 싶지만 네이티브 앱을 지원할 필요는 없는 경우에 사용할 수 있습니다. 예를 들어, 웹 UI가 있는 애플리케이션은 Python Core ML 백엔드를 완벽하게 사용할 수 있습니다.
+    * Swift 코드에는 `컴파일된` 모델이 필요합니다. Hub의 `컴파일된` 모델은 iOS 및 iPadOS 기기와의 호환성을 위해 큰 UNet 모델 가중치를 여러 파일로 분할합니다. 이는 [`--chunk-unet` 변환 옵션](https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml)에 해당합니다. 네이티브 앱을 지원하려면 `컴파일된` 변형을 선택해야 합니다.
 
-The official Core ML Stable Diffusion [models](https://huggingface.co/apple/coreml-stable-diffusion-v1-4/tree/main) include these variants, but the community ones may vary:
+공식 Core ML Stable Diffusion [모델](https://huggingface.co/apple/coreml-stable-diffusion-v1-4/tree/main)에는 이러한 변형이 포함되어 있지만 커뮤니티 버전은 다를 수 있습니다:
 
 ```
 coreml-stable-diffusion-v1-4
@@ -61,22 +61,22 @@ coreml-stable-diffusion-v1-4
     └── packages
 ```
 
-You can download and use the variant you need as shown below.
+아래와 같이 필요한 변형을 다운로드하여 사용할 수 있습니다.
 
-## Core ML Inference in Python
+## Python에서 Core ML 추론
 
-Install the following libraries to run Core ML inference in Python:
+Python에서 Core ML 추론을 실행하려면 다음 라이브러리를 설치하세요:
 
 ```bash
 pip install huggingface_hub
 pip install git+https://github.com/apple/ml-stable-diffusion
 ```
 
-### Download the Model Checkpoints
+### 모델 체크포인트 다운로드하기
 
-To run inference in Python, use one of the versions stored in the `packages` folders because the `compiled` ones are only compatible with Swift. You may choose whether you want to use `original` or `split_einsum` attention.
+`컴파일된` 버전은 Swift와만 호환되므로 Python에서 추론을 실행하려면 `packages` 폴더에 저장된 버전 중 하나를 사용하세요. `원본` 또는 `split_einsum` 어텐션 중 어느 것을 사용할지 선택할 수 있습니다.
 
-This is how you'd download the `original` attention variant from the Hub to a directory called `models`:
+다음은 Hub에서 'models'라는 디렉토리로 'original' 어텐션 변형을 다운로드하는 방법입니다:
 
 ```Python
 from huggingface_hub import snapshot_download
@@ -90,31 +90,33 @@ snapshot_download(repo_id, allow_patterns=f"{variant}/*", local_dir=model_path, 
 print(f"Model downloaded at {model_path}")
 ```
 
-### Inference[[python-inference]]
 
-Once you have downloaded a snapshot of the model, you can test it using Apple's Python script.
+### 추론[[python-inference]]
+
+모델의 snapshot을 다운로드한 후에는 Apple의 Python 스크립트를 사용하여 테스트할 수 있습니다.
 
 ```shell
 python -m python_coreml_stable_diffusion.pipeline --prompt "a photo of an astronaut riding a horse on mars" -i models/coreml-stable-diffusion-v1-4_original_packages -o </path/to/output/image> --compute-unit CPU_AND_GPU --seed 93
 ```
 
-Pass the path of the downloaded checkpoint with `-i` flag to the script. `--compute-unit` indicates the hardware you want to allow for inference. It must be one of the following options: `ALL`, `CPU_AND_GPU`, `CPU_ONLY`, `CPU_AND_NE`. You may also provide an optional output path, and a seed for reproducibility.
+`<output-mlpackages-directory>`는 위 단계에서 다운로드한 체크포인트를 가리켜야 하며, `--compute-unit`은 추론을 허용할 하드웨어를 나타냅니다. 이는 다음 옵션 중 하나이어야 합니다: `ALL`, `CPU_AND_GPU`, `CPU_ONLY`, `CPU_AND_NE`. 선택적 출력 경로와 재현성을 위한 시드를 제공할 수도 있습니다.
 
-The inference script assumes you're using the original version of the Stable Diffusion model, `CompVis/stable-diffusion-v1-4`. If you use another model, you *have* to specify its Hub id in the inference command line, using the `--model-version` option. This works for models already supported and custom models you trained or fine-tuned yourself.
+추론 스크립트에서는 Stable Diffusion 모델의 원래 버전인 `CompVis/stable-diffusion-v1-4`를 사용한다고 가정합니다. 다른 모델을 사용하는 경우 추론 명령줄에서 `--model-version` 옵션을 사용하여 해당 허브 ID를 *지정*해야 합니다. 이는 이미 지원되는 모델과 사용자가 직접 학습하거나 파인튜닝한 사용자 지정 모델에 적용됩니다.
 
-For example, if you want to use [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/runwayml/stable-diffusion-v1-5):
+예를 들어, [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/runwayml/stable-diffusion-v1-5)를 사용하려는 경우입니다:
 
 ```shell
 python -m python_coreml_stable_diffusion.pipeline --prompt "a photo of an astronaut riding a horse on mars" --compute-unit ALL -o output --seed 93 -i models/coreml-stable-diffusion-v1-5_original_packages --model-version runwayml/stable-diffusion-v1-5
 ```
 
-## Core ML inference in Swift
 
-Running inference in Swift is slightly faster than in Python because the models are already compiled in the `mlmodelc` format. This is noticeable on app startup when the model is loaded but shouldn’t be noticeable if you run several generations afterward.
+## Swift에서 Core ML 추론하기
 
-### Download
+Swift에서 추론을 실행하는 것은 모델이 이미 `mlmodelc` 형식으로 컴파일되어 있기 때문에 Python보다 약간 빠릅니다. 이는 앱이 시작될 때 모델이 불러와지는 것이 눈에 띄지만, 이후 여러 번 실행하면 눈에 띄지 않을 것입니다.
 
-To run inference in Swift on your Mac, you need one of the `compiled` checkpoint versions. We recommend you download them locally using Python code similar to the previous example, but with one of the `compiled` variants:
+### 다운로드
+
+Mac에서 Swift에서 추론을 실행하려면 `컴파일된` 체크포인트 버전 중 하나가 필요합니다. 이전 예제와 유사하지만 `컴파일된` 변형 중 하나를 사용하여 Python 코드를 로컬로 다운로드하는 것이 좋습니다:
 
 ```Python
 from huggingface_hub import snapshot_download
@@ -128,37 +130,39 @@ snapshot_download(repo_id, allow_patterns=f"{variant}/*", local_dir=model_path, 
 print(f"Model downloaded at {model_path}")
 ```
 
-### Inference[[swift-inference]]
+### 추론[[swift-inference]]
 
-To run inference, please clone Apple's repo:
+추론을 실행하기 위해서, Apple의 리포지토리를 복제하세요:
 
 ```bash
 git clone https://github.com/apple/ml-stable-diffusion
 cd ml-stable-diffusion
 ```
 
-And then use Apple's command line tool, [Swift Package Manager](https://www.swift.org/package-manager/#):
+그 다음 Apple의 명령어 도구인 [Swift 패키지 관리자](https://www.swift.org/package-manager/#)를 사용합니다:
 
 ```bash
 swift run StableDiffusionSample --resource-path models/coreml-stable-diffusion-v1-4_original_compiled --compute-units all "a photo of an astronaut riding a horse on mars"
 ```
 
-You have to specify in `--resource-path` one of the checkpoints downloaded in the previous step, so please make sure it contains compiled Core ML bundles with the extension `.mlmodelc`. The `--compute-units` has to be one of these values: `all`, `cpuOnly`, `cpuAndGPU`, `cpuAndNeuralEngine`.
+`--resource-path`에 이전 단계에서 다운로드한 체크포인트 중 하나를 지정해야 하므로 확장자가 `.mlmodelc`인 컴파일된 Core ML 번들이 포함되어 있는지 확인하시기 바랍니다. `--compute-units`는 다음 값 중 하나이어야 합니다: `all`, `cpuOnly`, `cpuAndGPU`, `cpuAndNeuralEngine`.
 
-For more details, please refer to the [instructions in Apple's repo](https://github.com/apple/ml-stable-diffusion).
+자세한 내용은 [Apple의 리포지토리 안의 지침](https://github.com/apple/ml-stable-diffusion)을 참고하시기 바랍니다.
 
-## Supported Diffusers Features
 
-The Core ML models and inference code don't support many of the features, options, and flexibility of 🧨 Diffusers. These are some of the limitations to keep in mind:
+## 지원되는 Diffusers 기능
 
-- Core ML models are only suitable for inference. They can't be used for training or fine-tuning.
-- Only two schedulers have been ported to Swift, the default one used by Stable Diffusion and `DPMSolverMultistepScheduler`, which we ported to Swift from our `diffusers` implementation. We recommend you use `DPMSolverMultistepScheduler`, since it produces the same quality in about half the steps.
-- Negative prompts, classifier-free guidance scale, and image-to-image tasks are available in the inference code. Advanced features such as depth guidance, ControlNet, and latent upscalers are not available yet.
+Core ML 모델과 추론 코드는 🧨 Diffusers의 많은 기능, 옵션 및 유연성을 지원하지 않습니다. 다음은 유의해야 할 몇 가지 제한 사항입니다:
 
-Apple's [conversion and inference repo](https://github.com/apple/ml-stable-diffusion) and our own [swift-coreml-diffusers](https://github.com/huggingface/swift-coreml-diffusers) repos are intended as technology demonstrators to enable other developers to build upon.
+- Core ML 모델은 추론에만 적합합니다. 학습이나 파인튜닝에는 사용할 수 없습니다.
+- Swift에 포팅된 스케줄러는 Stable Diffusion에서 사용하는 기본 스케줄러와 `diffusers` 구현에서 Swift로 포팅한 `DPMSolverMultistepScheduler` 두 개뿐입니다. 이들 중 약 절반의 스텝으로 동일한 품질을 생성하는 `DPMSolverMultistepScheduler`를 사용하는 것이 좋습니다.
+- 추론 코드에서 네거티브 프롬프트, classifier-free guidance scale 및 image-to-image 작업을 사용할 수 있습니다. depth guidance, ControlNet, latent upscalers와 같은 고급 기능은 아직 사용할 수 없습니다.
 
-If you feel strongly about any missing features, please feel free to open a feature request or, better yet, a contribution PR 🙂.
+Apple의 [변환 및 추론 리포지토리](https://github.com/apple/ml-stable-diffusion)와 자체 [swift-coreml-diffusers](https://github.com/huggingface/swift-coreml-diffusers) 리포지토리는 다른 개발자들이 구축할 수 있는 기술적인 데모입니다.
 
-## Native Diffusers Swift app
+누락된 기능이 있다고 생각되면 언제든지 기능을 요청하거나, 더 좋은 방법은 기여 PR을 열어주세요. :)
 
-One easy way to run Stable Diffusion on your own Apple hardware is to use [our open-source Swift repo](https://github.com/huggingface/swift-coreml-diffusers), based on `diffusers` and Apple's conversion and inference repo. You can study the code, compile it with [Xcode](https://developer.apple.com/xcode/) and adapt it for your own needs. For your convenience, there's also a [standalone Mac app in the App Store](https://apps.apple.com/app/diffusers/id1666309574), so you can play with it without having to deal with the code or IDE. If you are a developer and have determined that Core ML is the best solution to build your Stable Diffusion app, then you can use the rest of this guide to get started with your project. We can't wait to see what you'll build 🙂.
+
+## 네이티브 Diffusers Swift 앱
+
+자체 Apple 하드웨어에서 Stable Diffusion을 실행하는 쉬운 방법 중 하나는 `diffusers`와 Apple의 변환 및 추론 리포지토리를 기반으로 하는 [자체 오픈 소스 Swift 리포지토리](https://github.com/huggingface/swift-coreml-diffusers)를 사용하는 것입니다. 코드를 공부하고 [Xcode](https://developer.apple.com/xcode/)로 컴파일하여 필요에 맞게 조정할 수 있습니다. 편의를 위해 앱스토어에 [독립형 Mac 앱](https://apps.apple.com/app/diffusers/id1666309574)도 있으므로 코드나 IDE를 다루지 않고도 사용할 수 있습니다. 개발자로서 Core ML이 Stable Diffusion 앱을 구축하는 데 가장 적합한 솔루션이라고 판단했다면, 이 가이드의 나머지 부분을 사용하여 프로젝트를 시작할 수 있습니다. 여러분이 무엇을 빌드할지 기대됩니다. :)

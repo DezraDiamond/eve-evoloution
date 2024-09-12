@@ -10,31 +10,48 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Depth-to-image
+# Text-guided depth-to-image 생성
 
-The Stable Diffusion model can also infer depth based on an image using [MiDaS](https://github.com/isl-org/MiDaS). This allows you to pass a text prompt and an initial image to condition the generation of new images as well as a `depth_map` to preserve the image structure.
+[[open-in-colab]]
 
-<Tip>
+[`StableDiffusionDepth2ImgPipeline`]을 사용하면 텍스트 프롬프트와 초기 이미지를 전달하여 새 이미지의 생성을 조절할 수 있습니다. 또한 이미지 구조를 보존하기 위해 `depth_map`을 전달할 수도 있습니다. `depth_map`이 제공되지 않으면 파이프라인은 통합된 [depth-estimation model](https://github.com/isl-org/MiDaS)을 통해 자동으로 깊이를 예측합니다.
 
-Make sure to check out the Stable Diffusion [Tips](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/overview.md#tips) section to learn how to explore the tradeoff between scheduler speed and quality, and how to reuse pipeline components efficiently!
 
-If you're interested in using one of the official checkpoints for a task, explore the [CompVis](https://huggingface.co/CompVis), [Runway](https://huggingface.co/runwayml), and [Stability AI](https://huggingface.co/stabilityai) Hub organizations!
+먼저 [`StableDiffusionDepth2ImgPipeline`]의 인스턴스를 생성합니다:
 
-</Tip>
+```python
+import torch
+import requests
+from PIL import Image
 
-## StableDiffusionDepth2ImgPipeline
+from diffusers import StableDiffusionDepth2ImgPipeline
 
-[[autodoc]] StableDiffusionDepth2ImgPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-	- load_lora_weights
-	- save_lora_weights
+pipe = StableDiffusionDepth2ImgPipeline.from_pretrained(
+    "stabilityai/stable-diffusion-2-depth",
+    torch_dtype=torch.float16,
+).to("cuda")
+```
 
-## StableDiffusionPipelineOutput
+이제 프롬프트를 파이프라인에 전달합니다. 특정 단어가 이미지 생성을 가이드 하는것을 방지하기 위해 `negative_prompt`를 전달할 수도 있습니다:
 
-[[autodoc]] pipelines.stable_diffusion.StableDiffusionPipelineOutput
+```python
+url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+init_image = Image.open(requests.get(url, stream=True).raw)
+prompt = "two tigers"
+n_prompt = "bad, deformed, ugly, bad anatomy"
+image = pipe(prompt=prompt, image=init_image, negative_prompt=n_prompt, strength=0.7).images[0]
+image
+```
+
+| Input                                                                           | Output                                                                                                                                |
+|---------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/coco-cats.png" width="500"/> | <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/depth2img-tigers.png" width="500"/> |
+
+아래의 Spaces를 가지고 놀며 depth map이 있는 이미지와 없는 이미지의 차이가 있는지 확인해 보세요!
+
+<iframe
+	src="https://radames-stable-diffusion-depth2img.hf.space"
+	frameborder="0"
+	width="850"
+	height="500"
+></iframe>

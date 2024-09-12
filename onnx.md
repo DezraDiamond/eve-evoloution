@@ -10,77 +10,56 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# ONNX Runtime
 
-🤗 [Optimum](https://github.com/huggingface/optimum) provides a Stable Diffusion pipeline compatible with ONNX Runtime. You'll need to install 🤗 Optimum with the following command for ONNX Runtime support:
+# 추론을 위해 ONNX 런타임을 사용하는 방법
 
-```bash
-pip install -q optimum["onnxruntime"]
+🤗 Diffusers는 ONNX Runtime과 호환되는 Stable Diffusion 파이프라인을 제공합니다. 이를 통해 ONNX(CPU 포함)를 지원하고 PyTorch의 가속 버전을 사용할 수 없는 모든 하드웨어에서 Stable Diffusion을 실행할 수 있습니다.
+
+## 설치
+
+다음 명령어로 ONNX Runtime를 지원하는 🤗 Optimum를 설치합니다:
+
+```sh
+pip install optimum["onnxruntime"]
 ```
 
-This guide will show you how to use the Stable Diffusion and Stable Diffusion XL (SDXL) pipelines with ONNX Runtime.
+## Stable Diffusion 추론
 
-## Stable Diffusion
-
-To load and run inference, use the [`~optimum.onnxruntime.ORTStableDiffusionPipeline`]. If you want to load a PyTorch model and convert it to the ONNX format on-the-fly, set `export=True`:
+아래 코드는 ONNX 런타임을 사용하는 방법을 보여줍니다. `StableDiffusionPipeline` 대신 `OnnxStableDiffusionPipeline`을 사용해야 합니다.
+PyTorch 모델을 불러오고 즉시 ONNX 형식으로 변환하려는 경우 `export=True`로 설정합니다.
 
 ```python
 from optimum.onnxruntime import ORTStableDiffusionPipeline
 
 model_id = "runwayml/stable-diffusion-v1-5"
-pipeline = ORTStableDiffusionPipeline.from_pretrained(model_id, export=True)
-prompt = "sailing ship in storm by Leonardo da Vinci"
-image = pipeline(prompt).images[0]
-pipeline.save_pretrained("./onnx-stable-diffusion-v1-5")
+pipe = ORTStableDiffusionPipeline.from_pretrained(model_id, export=True)
+prompt = "a photo of an astronaut riding a horse on mars"
+images = pipe(prompt).images[0]
+pipe.save_pretrained("./onnx-stable-diffusion-v1-5")
 ```
 
-<Tip warning={true}>
-
-Generating multiple prompts in a batch seems to take too much memory. While we look into it, you may need to iterate instead of batching.
-
-</Tip>
-
-To export the pipeline in the ONNX format offline and use it later for inference,
-use the [`optimum-cli export`](https://huggingface.co/docs/optimum/main/en/exporters/onnx/usage_guides/export_a_model#exporting-a-model-to-onnx-using-the-cli) command:
+파이프라인을 ONNX 형식으로 오프라인으로 내보내고 나중에 추론에 사용하려는 경우,
+[`optimum-cli export`](https://huggingface.co/docs/optimum/main/en/exporters/onnx/usage_guides/export_a_model#exporting-a-model-to-onnx-using-the-cli) 명령어를 사용할 수 있습니다:
 
 ```bash
 optimum-cli export onnx --model runwayml/stable-diffusion-v1-5 sd_v15_onnx/
 ```
 
-Then to perform inference (you don't have to specify `export=True` again):
+그 다음 추론을 수행합니다:
 
 ```python
 from optimum.onnxruntime import ORTStableDiffusionPipeline
 
 model_id = "sd_v15_onnx"
-pipeline = ORTStableDiffusionPipeline.from_pretrained(model_id)
-prompt = "sailing ship in storm by Leonardo da Vinci"
-image = pipeline(prompt).images[0]
+pipe = ORTStableDiffusionPipeline.from_pretrained(model_id)
+prompt = "a photo of an astronaut riding a horse on mars"
+images = pipe(prompt).images[0]
 ```
 
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/optimum/documentation-images/resolve/main/onnxruntime/stable_diffusion_v1_5_ort_sail_boat.png">
-</div>
+Notice that we didn't have to specify `export=True` above.
 
-You can find more examples in 🤗 Optimum [documentation](https://huggingface.co/docs/optimum/), and Stable Diffusion is supported for text-to-image, image-to-image, and inpainting.
+[Optimum 문서](https://huggingface.co/docs/optimum/)에서 더 많은 예시를 찾을 수 있습니다.
 
-## Stable Diffusion XL
+## 알려진 이슈들
 
-To load and run inference with SDXL, use the [`~optimum.onnxruntime.ORTStableDiffusionXLPipeline`]:
-
-```python
-from optimum.onnxruntime import ORTStableDiffusionXLPipeline
-
-model_id = "stabilityai/stable-diffusion-xl-base-1.0"
-pipeline = ORTStableDiffusionXLPipeline.from_pretrained(model_id)
-prompt = "sailing ship in storm by Leonardo da Vinci"
-image = pipeline(prompt).images[0]
-```
-
-To export the pipeline in the ONNX format and use it later for inference, use the [`optimum-cli export`](https://huggingface.co/docs/optimum/main/en/exporters/onnx/usage_guides/export_a_model#exporting-a-model-to-onnx-using-the-cli) command:
-
-```bash
-optimum-cli export onnx --model stabilityai/stable-diffusion-xl-base-1.0 --task stable-diffusion-xl sd_xl_onnx/
-```
-
-SDXL in the ONNX format is supported for text-to-image and image-to-image.
+- 여러 프롬프트를 배치로 생성하면 너무 많은 메모리가 사용되는 것 같습니다. 이를 조사하는 동안, 배치 대신 반복 방법이 필요할 수도 있습니다.

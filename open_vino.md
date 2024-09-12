@@ -10,71 +10,30 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# OpenVINO
+# 추론을 위한 OpenVINO 사용 방법
 
-🤗 [Optimum](https://github.com/huggingface/optimum-intel) provides Stable Diffusion pipelines compatible with OpenVINO to perform inference on a variety of Intel processors (see the [full list](https://docs.openvino.ai/latest/openvino_docs_OV_UG_supported_plugins_Supported_Devices.html) of supported devices).
+🤗 [Optimum](https://github.com/huggingface/optimum-intel)은 OpenVINO와 호환되는 Stable Diffusion 파이프라인을 제공합니다.
+이제 다양한 Intel 프로세서에서 OpenVINO Runtime으로 쉽게 추론을 수행할 수 있습니다. ([여기](https://docs.openvino.ai/latest/openvino_docs_OV_UG_supported_plugins_Supported_Devices.html)서 지원되는 전 기기 목록을 확인하세요).
 
-You'll need to install 🤗 Optimum Intel with the `--upgrade-strategy eager` option to ensure [`optimum-intel`](https://github.com/huggingface/optimum-intel) is using the latest version:
+## 설치
 
-```bash
-pip install --upgrade-strategy eager optimum["openvino"]
+다음 명령어로 🤗 Optimum을 설치합니다:
+
+```sh
+pip install optimum["openvino"]
 ```
 
-This guide will show you how to use the Stable Diffusion and Stable Diffusion XL (SDXL) pipelines with OpenVINO.
+## Stable Diffusion 추론
 
-## Stable Diffusion
-
-To load and run inference, use the [`~optimum.intel.OVStableDiffusionPipeline`]. If you want to load a PyTorch model and convert it to the OpenVINO format on-the-fly, set `export=True`:
+OpenVINO 모델을 불러오고 OpenVINO 런타임으로 추론을 실행하려면 `StableDiffusionPipeline`을 `OVStableDiffusionPipeline`으로 교체해야 합니다. PyTorch 모델을 불러오고 즉시 OpenVINO 형식으로 변환하려는 경우 `export=True`로 설정합니다.
 
 ```python
-from optimum.intel import OVStableDiffusionPipeline
+from optimum.intel.openvino import OVStableDiffusionPipeline
 
 model_id = "runwayml/stable-diffusion-v1-5"
-pipeline = OVStableDiffusionPipeline.from_pretrained(model_id, export=True)
-prompt = "sailing ship in storm by Rembrandt"
-image = pipeline(prompt).images[0]
-
-# Don't forget to save the exported model
-pipeline.save_pretrained("openvino-sd-v1-5")
+pipe = OVStableDiffusionPipeline.from_pretrained(model_id, export=True)
+prompt = "a photo of an astronaut riding a horse on mars"
+images = pipe(prompt).images[0]
 ```
 
-To further speed-up inference, statically reshape the model. If you change any parameters such as the outputs height or width, you’ll need to statically reshape your model again.
-
-```python
-# Define the shapes related to the inputs and desired outputs
-batch_size, num_images, height, width = 1, 1, 512, 512
-
-# Statically reshape the model
-pipeline.reshape(batch_size, height, width, num_images)
-# Compile the model before inference
-pipeline.compile()
-
-image = pipeline(
-    prompt,
-    height=height,
-    width=width,
-    num_images_per_prompt=num_images,
-).images[0]
-```
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/optimum/documentation-images/resolve/main/intel/openvino/stable_diffusion_v1_5_sail_boat_rembrandt.png">
-</div>
-
-You can find more examples in the 🤗 Optimum [documentation](https://huggingface.co/docs/optimum/intel/inference#stable-diffusion), and Stable Diffusion is supported for text-to-image, image-to-image, and inpainting.
-
-## Stable Diffusion XL
-
-To load and run inference with SDXL, use the [`~optimum.intel.OVStableDiffusionXLPipeline`]:
-
-```python
-from optimum.intel import OVStableDiffusionXLPipeline
-
-model_id = "stabilityai/stable-diffusion-xl-base-1.0"
-pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_id)
-prompt = "sailing ship in storm by Rembrandt"
-image = pipeline(prompt).images[0]
-```
-
-To further speed-up inference, [statically reshape](#stable-diffusion) the model as shown in the Stable Diffusion section.
-
-You can find more examples in the 🤗 Optimum [documentation](https://huggingface.co/docs/optimum/intel/inference#stable-diffusion-xl), and running SDXL in OpenVINO is supported for text-to-image and image-to-image.
+[Optimum 문서](https://huggingface.co/docs/optimum/intel/inference#export-and-inference-of-stable-diffusion-models)에서 (정적 reshaping과 모델 컴파일 등의) 더 많은 예시들을 찾을 수 있습니다.

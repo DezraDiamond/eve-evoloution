@@ -10,46 +10,51 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Unconditional image generation
+# Unconditional 이미지 생성
 
 [[open-in-colab]]
 
-Unconditional image generation generates images that look like a random sample from the training data the model was trained on because the denoising process is not guided by any additional context like text or image.
+Unconditional 이미지 생성은 비교적 간단한 작업입니다. 모델이 텍스트나 이미지와 같은 추가 조건 없이 이미 학습된 학습 데이터와 유사한 이미지만 생성합니다.
 
-To get started, use the [`DiffusionPipeline`] to load the [anton-l/ddpm-butterflies-128](https://huggingface.co/anton-l/ddpm-butterflies-128) checkpoint to generate images of butterflies. The [`DiffusionPipeline`] downloads and caches all the model components required to generate an image.
+['DiffusionPipeline']은 추론을 위해 미리 학습된 diffusion 시스템을 사용하는 가장 쉬운 방법입니다.
 
-```py
-from diffusers import DiffusionPipeline
-
-generator = DiffusionPipeline.from_pretrained("anton-l/ddpm-butterflies-128").to("cuda")
-image = generator().images[0]
-image
-```
+먼저 ['DiffusionPipeline']의 인스턴스를 생성하고 다운로드할 파이프라인의 [체크포인트](https://huggingface.co/models?library=diffusers&sort=downloads)를 지정합니다. 허브의 🧨 diffusion 체크포인트 중 하나를 사용할 수 있습니다(사용할 체크포인트는 나비 이미지를 생성합니다).
 
 <Tip>
 
-Want to generate images of something else? Take a look at the training [guide](fort-obsidian/diffusers/docs/source/en/training/unconditional_training.md) to learn how to train a model to generate your own images.
+💡 나만의 unconditional 이미지 생성 모델을 학습시키고 싶으신가요? 학습 가이드를 살펴보고 나만의 이미지를 생성하는 방법을 알아보세요.
 
 </Tip>
 
-The output image is a [`PIL.Image`](https://pillow.readthedocs.io/en/stable/reference/Image.html?highlight=image#the-image-class) object that can be saved:
 
-```py
-image.save("generated_image.png")
+이 가이드에서는 unconditional 이미지 생성에 ['DiffusionPipeline']과 [DDPM](https://arxiv.org/abs/2006.11239)을 사용합니다:
+
+```python
+ >>> from diffusers import DiffusionPipeline
+
+ >>> generator = DiffusionPipeline.from_pretrained("anton-l/ddpm-butterflies-128")
 ```
 
-You can also try experimenting with the `num_inference_steps` parameter, which controls the number of denoising steps. More denoising steps typically produce higher quality images, but it'll take longer to generate. Feel free to play around with this parameter to see how it affects the image quality.
+[diffusion 파이프라인]은 모든 모델링, 토큰화, 스케줄링 구성 요소를 다운로드하고 캐시합니다. 이 모델은 약 14억 개의 파라미터로 구성되어 있기 때문에 GPU에서 실행할 것을 강력히 권장합니다. PyTorch에서와 마찬가지로 제너레이터 객체를 GPU로 옮길 수 있습니다:
 
-```py
-image = generator(num_inference_steps=100).images[0]
-image
+```python
+ >>> generator.to("cuda")
 ```
 
-Try out the Space below to generate an image of a butterfly!
+이제 제너레이터를 사용하여 이미지를 생성할 수 있습니다:
 
-<iframe
-	src="https://stevhliu-unconditional-image-generation.hf.space"
-	frameborder="0"
-	width="850"
-	height="500"
-></iframe>
+```python
+ >>> image = generator().images[0]
+```
+
+출력은 기본적으로 [PIL.Image](https://pillow.readthedocs.io/en/stable/reference/Image.html?highlight=image#the-image-class) 객체로 감싸집니다.
+
+다음을 호출하여 이미지를 저장할 수 있습니다:
+
+```python
+ >>> image.save("generated_image.png")
+```
+
+아래 스페이스(데모 링크)를 이용해 보고, 추론 단계의 매개변수를 자유롭게 조절하여 이미지 품질에 어떤 영향을 미치는지 확인해 보세요!
+
+<iframe src="https://stevhliu-ddpm-butterflies-128.hf.space" frameborder="0" width="850" height="500"></iframe>

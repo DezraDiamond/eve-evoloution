@@ -10,155 +10,133 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Installation
+# 설치
 
-🤗 Diffusers is tested on Python 3.8+, PyTorch 1.7.0+, and Flax. Follow the installation instructions below for the deep learning library you are using:
+사용하시는 라이브러리에 맞는 🤗 Diffusers를 설치하세요.
 
-- [PyTorch](https://pytorch.org/get-started/locally/) installation instructions
-- [Flax](https://flax.readthedocs.io/en/latest/) installation instructions
+🤗 Diffusers는 Python 3.8+, PyTorch 1.7.0+ 및 flax에서 테스트되었습니다. 사용중인 딥러닝 라이브러리에 대한 아래의 설치 안내를 따르세요.
 
-## Install with pip
+- [PyTorch 설치 안내](https://pytorch.org/get-started/locally/)
+- [Flax 설치 안내](https://flax.readthedocs.io/en/latest/)
 
-You should install 🤗 Diffusers in a [virtual environment](https://docs.python.org/3/library/venv.html).
-If you're unfamiliar with Python virtual environments, take a look at this [guide](https://packaging.python.org/guides/installing-using-pip-and-virtual-environments/).
-A virtual environment makes it easier to manage different projects and avoid compatibility issues between dependencies.
+## pip를 이용한 설치
 
-Start by creating a virtual environment in your project directory:
+[가상 환경](https://docs.python.org/3/library/venv.html)에 🤗 Diffusers를 설치해야 합니다.
+Python 가상 환경에 익숙하지 않은 경우 [가상환경 pip 설치 가이드](https://packaging.python.org/guides/installing-using-pip-and-virtual-environments/)를 살펴보세요.
+가상 환경을 사용하면 서로 다른 프로젝트를 더 쉽게 관리하고, 종속성간의 호환성 문제를 피할 수 있습니다.
+
+프로젝트 디렉토리에 가상 환경을 생성하는 것으로 시작하세요:
 
 ```bash
 python -m venv .env
 ```
 
-Activate the virtual environment:
+그리고 가상 환경을 활성화합니다:
 
 ```bash
 source .env/bin/activate
 ```
 
-You should also install 🤗 Transformers because 🤗 Diffusers relies on its models:
+이제 다음의 명령어로 🤗 Diffusers를 설치할 준비가 되었습니다:
 
-
-<frameworkcontent>
-<pt>
-Note - PyTorch only supports Python 3.8 - 3.11 on Windows.
-```bash
-pip install diffusers["torch"] transformers
-```
-</pt>
-<jax>
-```bash
-pip install diffusers["flax"] transformers
-```
-</jax>
-</frameworkcontent>
-
-## Install with conda
-
-After activating your virtual environment, with `conda` (maintained by the community):
+**PyTorch의 경우**
 
 ```bash
-conda install -c conda-forge diffusers
+pip install diffusers["torch"]
 ```
 
-## Install from source
+**Flax의 경우**
 
-Before installing 🤗 Diffusers from source, make sure you have PyTorch and 🤗 Accelerate installed.
+```bash
+pip install diffusers["flax"]
+```
 
-To install 🤗 Accelerate:
+## 소스로부터 설치
+
+소스에서 `diffusers`를 설치하기 전에, `torch` 및 `accelerate`이 설치되어 있는지 확인하세요.
+
+`torch` 설치에 대해서는 [torch docs](https://pytorch.org/get-started/locally/#start-locally)를 참고하세요.
+
+다음과 같이 `accelerate`을 설치하세요.
 
 ```bash
 pip install accelerate
 ```
 
-Then install 🤗 Diffusers from source:
+다음 명령어를 사용하여 소스에서 🤗 Diffusers를 설치하세요:
 
 ```bash
 pip install git+https://github.com/huggingface/diffusers
 ```
 
-This command installs the bleeding edge `main` version rather than the latest `stable` version.
-The `main` version is useful for staying up-to-date with the latest developments.
-For instance, if a bug has been fixed since the last official release but a new release hasn't been rolled out yet.
-However, this means the `main` version may not always be stable.
-We strive to keep the `main` version operational, and most issues are usually resolved within a few hours or a day.
-If you run into a problem, please open an [Issue](https://github.com/huggingface/diffusers/issues/new/choose) so we can fix it even sooner!
+이 명령어는 최신 `stable` 버전이 아닌 최첨단 `main` 버전을 설치합니다.
+`main` 버전은 최신 개발 정보를 최신 상태로 유지하는 데 유용합니다.
+예를 들어 마지막 공식 릴리즈 이후 버그가 수정되었지만, 새 릴리즈가 아직 출시되지 않은 경우입니다.
+그러나 이는 `main` 버전이 항상 안정적이지 않을 수 있음을 의미합니다.
+우리는 `main` 버전이 지속적으로 작동하도록 노력하고 있으며, 대부분의 문제는 보통 몇 시간 또는 하루 안에 해결됩니다.
+문제가 발생하면 더 빨리 해결할 수 있도록 [Issue](https://github.com/huggingface/transformers/issues)를 열어주세요!
 
-## Editable install
 
-You will need an editable install if you'd like to:
+## 편집가능한 설치
 
-* Use the `main` version of the source code.
-* Contribute to 🤗 Diffusers and need to test changes in the code.
+다음을 수행하려면 편집가능한 설치가 필요합니다:
 
-Clone the repository and install 🤗 Diffusers with the following commands:
+* 소스 코드의 `main` 버전을 사용
+* 🤗 Diffusers에 기여 (코드의 변경 사항을 테스트하기 위해 필요)
+
+저장소를 복제하고 다음 명령어를 사용하여 🤗 Diffusers를 설치합니다:
 
 ```bash
 git clone https://github.com/huggingface/diffusers.git
 cd diffusers
 ```
 
-<frameworkcontent>
-<pt>
-```bash
+**PyTorch의 경우**
+
+```sh
 pip install -e ".[torch]"
 ```
-</pt>
-<jax>
-```bash
+
+**Flax의 경우**
+
+```sh
 pip install -e ".[flax]"
 ```
-</jax>
-</frameworkcontent>
 
-These commands will link the folder you cloned the repository to and your Python library paths.
-Python will now look inside the folder you cloned to in addition to the normal library paths.
-For example, if your Python packages are typically installed in `~/anaconda3/envs/main/lib/python3.10/site-packages/`, Python will also search the `~/diffusers/` folder you cloned to.
+이러한 명령어들은 저장소를 복제한 폴더와 Python 라이브러리 경로를 연결합니다.
+Python은 이제 일반 라이브러리 경로에 더하여 복제한 폴더 내부를 살펴봅니다.
+예를들어 Python 패키지가 `~/anaconda3/envs/main/lib/python3.10/site-packages/`에 설치되어 있는 경우 Python은 복제한 폴더인 `~/diffusers/`도 검색합니다.
 
 <Tip warning={true}>
 
-You must keep the `diffusers` folder if you want to keep using the library.
+라이브러리를 계속 사용하려면 `diffusers` 폴더를 유지해야 합니다.
 
 </Tip>
 
-Now you can easily update your clone to the latest version of 🤗 Diffusers with the following command:
+이제 다음 명령어를 사용하여 최신 버전의 🤗 Diffusers로 쉽게 업데이트할 수 있습니다:
 
 ```bash
 cd ~/diffusers/
 git pull
 ```
 
-Your Python environment will find the `main` version of 🤗 Diffusers on the next run.
+이렇게 하면, 다음에 실행할 때 Python 환경이 🤗 Diffusers의 `main` 버전을 찾게 됩니다.
 
-## Cache
+## 텔레메트리 로깅에 대한 알림
 
-Model weights and files are downloaded from the Hub to a cache which is usually your home directory. You can change the cache location by specifying the `HF_HOME` or `HUGGINFACE_HUB_CACHE` environment variables or configuring the `cache_dir` parameter in methods like [`~DiffusionPipeline.from_pretrained`].
+우리 라이브러리는 `from_pretrained()` 요청 중에 텔레메트리 정보를 원격으로 수집합니다.
+이 데이터에는 Diffusers 및 PyTorch/Flax의 버전, 요청된 모델 또는 파이프라인 클래스, 그리고 허브에서 호스팅되는 경우 사전학습된 체크포인트에 대한 경로를 포함합니다.
+이 사용 데이터는 문제를 디버깅하고 새로운 기능의 우선순위를 지정하는데 도움이 됩니다.
+텔레메트리는 HuggingFace 허브에서 모델과 파이프라인을 불러올 때만 전송되며, 로컬 사용 중에는 수집되지 않습니다.
 
-Cached files allow you to run 🤗 Diffusers offline. To prevent 🤗 Diffusers from connecting to the internet, set the `HF_HUB_OFFLINE` environment variable to `True` and 🤗 Diffusers will only load previously downloaded files in the cache.
+우리는 추가 정보를 공유하지 않기를 원하는 사람이 있다는 것을 이해하고 개인 정보를 존중하므로, 터미널에서 `DISABLE_TELEMETRY` 환경 변수를 설정하여 텔레메트리 수집을 비활성화할 수 있습니다.
 
-```shell
-export HF_HUB_OFFLINE=True
-```
-
-For more details about managing and cleaning the cache, take a look at the [caching](https://huggingface.co/docs/huggingface_hub/guides/manage-cache) guide.
-
-## Telemetry logging
-
-Our library gathers telemetry information during [`~DiffusionPipeline.from_pretrained`] requests.
-The data gathered includes the version of 🤗 Diffusers and PyTorch/Flax, the requested model or pipeline class,
-and the path to a pretrained checkpoint if it is hosted on the Hugging Face Hub.
-This usage data helps us debug issues and prioritize new features.
-Telemetry is only sent when loading models and pipelines from the Hub,
-and it is not collected if you're loading local files.
-
-We understand that not everyone wants to share additional information,and we respect your privacy.
-You can disable telemetry collection by setting the `DISABLE_TELEMETRY` environment variable from your terminal:
-
-On Linux/MacOS:
+Linux/MacOS에서:
 ```bash
 export DISABLE_TELEMETRY=YES
 ```
 
-On Windows:
+Windows에서:
 ```bash
 set DISABLE_TELEMETRY=YES
 ```

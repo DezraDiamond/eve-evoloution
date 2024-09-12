@@ -10,472 +10,182 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Model files and layouts
+# 다양한 Stable Diffusion 포맷 불러오기
 
-[[open-in-colab]]
+Stable Diffusion 모델들은 학습 및 저장된 프레임워크와 다운로드 위치에 따라 다양한 형식으로 제공됩니다. 이러한 형식을 🤗 Diffusers에서 사용할 수 있도록 변환하면 추론을 위한 [다양한 스케줄러 사용](fort-obsidian/diffusers/docs/source/ko/using-diffusers/schedulers.md), 사용자 지정 파이프라인 구축, 추론 속도 최적화를 위한 다양한 기법과 방법 등 라이브러리에서 지원하는 모든 기능을 사용할 수 있습니다.
 
-Diffusion models are saved in various file types and organized in different layouts. Diffusers stores model weights as safetensors files in *Diffusers-multifolder* layout and it also supports loading files (like safetensors and ckpt files) from a *single-file* layout which is commonly used in the diffusion ecosystem.
+<Tip>
 
-Each layout has its own benefits and use cases, and this guide will show you how to load the different files and layouts, and how to convert them.
+우리는 `.safetensors` 형식을 추천합니다. 왜냐하면 기존의 pickled 파일은 취약하고 머신에서 코드를 실행할 때 악용될 수 있는 것에 비해 훨씬 더 안전합니다. (safetensors 불러오기 가이드에서 자세히 알아보세요.)
 
-## Files
+</Tip>
 
-PyTorch model weights are typically saved with Python's [pickle](https://docs.python.org/3/library/pickle.html) utility as ckpt or bin files. However, pickle is not secure and pickled files may contain malicious code that can be executed. This vulnerability is a serious concern given the popularity of model sharing. To address this security issue, the [Safetensors](https://hf.co/docs/safetensors) library was developed as a secure alternative to pickle, which saves models as safetensors files.
+이 가이드에서는 다른 Stable Diffusion 형식을 🤗 Diffusers와 호환되도록 변환하는 방법을 설명합니다.
 
-### safetensors
+## PyTorch .ckpt
 
-> [!TIP]
-> Learn more about the design decisions and why safetensor files are preferred for saving and loading model weights in the [Safetensors audited as really safe and becoming the default](https://blog.eleuther.ai/safetensors-security-audit/) blog post.
+체크포인트 또는 `.ckpt` 형식은 일반적으로 모델을 저장하는 데 사용됩니다. `.ckpt` 파일은 전체 모델을 포함하며 일반적으로 크기가 몇 GB입니다. `.ckpt` 파일을 [~StableDiffusionPipeline.from_ckpt] 메서드를 사용하여 직접 불러와서 사용할 수도 있지만, 일반적으로 두 가지 형식을 모두 사용할 수 있도록 `.ckpt` 파일을 🤗 Diffusers로 변환하는 것이 더 좋습니다.
 
-[Safetensors](https://hf.co/docs/safetensors) is a safe and fast file format for securely storing and loading tensors. Safetensors restricts the header size to limit certain types of attacks, supports lazy loading (useful for distributed setups), and has generally faster loading speeds.
+`.ckpt` 파일을 변환하는 두 가지 옵션이 있습니다. Space를 사용하여 체크포인트를 변환하거나 스크립트를 사용하여 `.ckpt` 파일을 변환합니다.
 
-Make sure you have the [Safetensors](https://hf.co/docs/safetensors) library installed.
+### Space로 변환하기
 
-```py
-!pip install safetensors
-```
+`.ckpt` 파일을 변환하는 가장 쉽고 편리한 방법은 SD에서 Diffusers로 스페이스를 사용하는 것입니다. Space의 지침에 따라 .ckpt 파일을 변환 할 수 있습니다.
 
-Safetensors stores weights in a safetensors file. Diffusers loads safetensors files by default if they're available and the Safetensors library is installed. There are two ways safetensors files can be organized:
+이 접근 방식은 기본 모델에서는 잘 작동하지만 더 많은 사용자 정의 모델에서는 어려움을 겪을 수 있습니다. 빈 pull request나 오류를 반환하면 Space가 실패한 것입니다.
+이 경우 스크립트를 사용하여 `.ckpt` 파일을 변환해 볼 수 있습니다.
 
-1. Diffusers-multifolder layout: there may be several separate safetensors files, one for each pipeline component (text encoder, UNet, VAE), organized in subfolders (check out the [runwayml/stable-diffusion-v1-5](https://hf.co/runwayml/stable-diffusion-v1-5/tree/main) repository as an example)
-2. single-file layout: all the model weights may be saved in a single file (check out the [WarriorMama777/OrangeMixs](https://hf.co/WarriorMama777/OrangeMixs/tree/main/Models/AbyssOrangeMix) repository as an example)
+### 스크립트로 변환하기
 
-<hfoptions id="safetensors">
-<hfoption id="multifolder">
+🤗 Diffusers는 `.ckpt`  파일 변환을 위한 변환 스크립트를 제공합니다. 이 접근 방식은 위의 Space보다 더 안정적입니다.
 
-Use the [`~DiffusionPipeline.from_pretrained`] method to load a model with safetensors files stored in multiple folders.
-
-```py
-from diffusers import DiffusionPipeline
-
-pipeline = DiffusionPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5",
-    use_safetensors=True
-)
-```
-
-</hfoption>
-<hfoption id="single file">
-
-Use the [`~loaders.FromSingleFileMixin.from_single_file`] method to load a model with all the weights stored in a single safetensors file.
-
-```py
-from diffusers import StableDiffusionPipeline
-
-pipeline = StableDiffusionPipeline.from_single_file(
-    "https://huggingface.co/WarriorMama777/OrangeMixs/blob/main/Models/AbyssOrangeMix/AbyssOrangeMix.safetensors"
-)
-```
-
-</hfoption>
-</hfoptions>
-
-#### LoRA files
-
-[LoRA](https://hf.co/docs/peft/conceptual_guides/adapter#low-rank-adaptation-lora) is a lightweight adapter that is fast and easy to train, making them especially popular for generating images in a certain way or style. These adapters are commonly stored in a safetensors file, and are widely popular on model sharing platforms like [civitai](https://civitai.com/).
-
-LoRAs are loaded into a base model with the [`~loaders.LoraLoaderMixin.load_lora_weights`] method.
-
-```py
-from diffusers import StableDiffusionXLPipeline
-import torch
-
-# base model
-pipeline = StableDiffusionXLPipeline.from_pretrained(
-    "Lykon/dreamshaper-xl-1-0", torch_dtype=torch.float16, variant="fp16"
-).to("cuda")
-
-# download LoRA weights
-!wget https://civitai.com/api/download/models/168776 -O blueprintify.safetensors
-
-# load LoRA weights
-pipeline.load_lora_weights(".", weight_name="blueprintify.safetensors")
-prompt = "bl3uprint, a highly detailed blueprint of the empire state building, explaining how to build all parts, many txt, blueprint grid backdrop"
-negative_prompt = "lowres, cropped, worst quality, low quality, normal quality, artifacts, signature, watermark, username, blurry, more than one bridge, bad architecture"
-
-image = pipeline(
-    prompt=prompt,
-    negative_prompt=negative_prompt,
-    generator=torch.manual_seed(0),
-).images[0]
-image
-```
-
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/blueprint-lora.png"/>
-</div>
-
-### ckpt
-
-> [!WARNING]
-> Pickled files may be unsafe because they can be exploited to execute malicious code. It is recommended to use safetensors files instead where possible, or convert the weights to safetensors files.
-
-PyTorch's [torch.save](https://pytorch.org/docs/stable/generated/torch.save.html) function uses Python's [pickle](https://docs.python.org/3/library/pickle.html) utility to serialize and save models. These files are saved as a ckpt file and they contain the entire model's weights.
-
-Use the [`~loaders.FromSingleFileMixin.from_single_file`] method to directly load a ckpt file.
-
-```py
-from diffusers import StableDiffusionPipeline
-
-pipeline = StableDiffusionPipeline.from_single_file(
-    "https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v1-5-pruned.ckpt"
-)
-```
-
-## Storage layout
-
-There are two ways model files are organized, either in a Diffusers-multifolder layout or in a single-file layout. The Diffusers-multifolder layout is the default, and each component file (text encoder, UNet, VAE) is stored in a separate subfolder. Diffusers also supports loading models from a single-file layout where all the components are bundled together.
-
-### Diffusers-multifolder
-
-The Diffusers-multifolder layout is the default storage layout for Diffusers. Each component's (text encoder, UNet, VAE) weights are stored in a separate subfolder. The weights can be stored as safetensors or ckpt files.
-
-<div class="flex flex-row gap-4">
-  <div class="flex-1">
-    <img class="rounded-xl" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/multifolder-layout.png"/>
-    <figcaption class="mt-2 text-center text-sm text-gray-500">multifolder layout</figcaption>
-  </div>
-  <div class="flex-1">
-    <img class="rounded-xl" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/multifolder-unet.png"/>
-    <figcaption class="mt-2 text-center text-sm text-gray-500">UNet subfolder</figcaption>
-  </div>
-</div>
-
-To load from Diffusers-multifolder layout, use the [`~DiffusionPipeline.from_pretrained`] method.
-
-```py
-from diffusers import DiffusionPipeline
-
-pipeline = DiffusionPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    torch_dtype=torch.float16,
-    variant="fp16",
-    use_safetensors=True,
-).to("cuda")
-```
-
-Benefits of using the Diffusers-multifolder layout include:
-
-1. Faster to load each component file individually or in parallel.
-2. Reduced memory usage because you only load the components you need. For example, models like [SDXL Turbo](https://hf.co/stabilityai/sdxl-turbo), [SDXL Lightning](https://hf.co/ByteDance/SDXL-Lightning), and [Hyper-SD](https://hf.co/ByteDance/Hyper-SD) have the same components except for the UNet. You can reuse their shared components with the [`~DiffusionPipeline.from_pipe`] method without consuming any additional memory (take a look at the [Reuse a pipeline](fort-obsidian/diffusers/docs/source/en/using-diffusers/loading.md#reuse-a-pipeline) guide) and only load the UNet. This way, you don't need to download redundant components and unnecessarily use more memory.
-
-    ```py
-    import torch
-    from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler
-
-    # download one model
-    sdxl_pipeline = StableDiffusionXLPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True,
-    ).to("cuda")
-
-    # switch UNet for another model
-    unet = UNet2DConditionModel.from_pretrained(
-        "stabilityai/sdxl-turbo",
-        subfolder="unet",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True
-    )
-    # reuse all the same components in new model except for the UNet
-    turbo_pipeline = StableDiffusionXLPipeline.from_pipe(
-        sdxl_pipeline, unet=unet,
-    ).to("cuda")
-    turbo_pipeline.scheduler = EulerDiscreteScheduler.from_config(
-        turbo_pipeline.scheduler.config,
-        timestep+spacing="trailing"
-    )
-    image = turbo_pipeline(
-        "an astronaut riding a unicorn on mars",
-        num_inference_steps=1,
-        guidance_scale=0.0,
-    ).images[0]
-    image
-    ```
-
-3. Reduced storage requirements because if a component, such as the SDXL [VAE](https://hf.co/madebyollin/sdxl-vae-fp16-fix), is shared across multiple models, you only need to download and store a single copy of it instead of downloading and storing it multiple times. For 10 SDXL models, this can save ~3.5GB of storage. The storage savings is even greater for newer models like PixArt Sigma, where the [text encoder](https://hf.co/PixArt-alpha/PixArt-Sigma-XL-2-1024-MS/tree/main/text_encoder) alone is ~19GB!
-4. Flexibility to replace a component in the model with a newer or better version.
-
-    ```py
-    from diffusers import DiffusionPipeline, AutoencoderKL
-
-    vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16, use_safetensors=True)
-    pipeline = DiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        vae=vae,
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True,
-    ).to("cuda")
-    ```
-
-5. More visibility and information about a model's components, which are stored in a [config.json](https://hf.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/unet/config.json) file in each component subfolder.
-
-### Single-file
-
-The single-file layout stores all the model weights in a single file. All the model components (text encoder, UNet, VAE) weights are kept together instead of separately in subfolders. This can be a safetensors or ckpt file.
-
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/single-file-layout.png"/>
-</div>
-
-To load from a single-file layout, use the [`~loaders.FromSingleFileMixin.from_single_file`] method.
-
-```py
-import torch
-from diffusers import StableDiffusionXLPipeline
-
-pipeline = StableDiffusionXLPipeline.from_single_file(
-    "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0.safetensors",
-    torch_dtype=torch.float16,
-    variant="fp16",
-    use_safetensors=True,
-).to("cuda")
-```
-
-Benefits of using a single-file layout include:
-
-1. Easy compatibility with diffusion interfaces such as [ComfyUI](https://github.com/comfyanonymous/ComfyUI) or [Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui) which commonly use a single-file layout.
-2. Easier to manage (download and share) a single file.
-
-## Convert layout and files
-
-Diffusers provides many scripts and methods to convert storage layouts and file formats to enable broader support across the diffusion ecosystem.
-
-Take a look at the [diffusers/scripts](https://github.com/huggingface/diffusers/tree/main/scripts) collection to find a script that fits your conversion needs.
-
-> [!TIP]
-> Scripts that have "`to_diffusers`" appended at the end mean they convert a model to the Diffusers-multifolder layout. Each script has their own specific set of arguments for configuring the conversion, so make sure you check what arguments are available!
-
-For example, to convert a Stable Diffusion XL model stored in Diffusers-multifolder layout to a single-file layout, run the [convert_diffusers_to_original_sdxl.py](https://github.com/huggingface/diffusers/blob/main/scripts/convert_diffusers_to_original_sdxl.py) script. Provide the path to the model to convert, and the path to save the converted model to. You can optionally specify whether you want to save the model as a safetensors file and whether to save the model in half-precision.
+시작하기 전에 스크립트를 실행할 🤗 Diffusers의 로컬 클론(clone)이 있는지 확인하고 Hugging Face 계정에 로그인하여 pull request를 열고 변환된 모델을 허브에 푸시할 수 있도록 하세요.
 
 ```bash
-python convert_diffusers_to_original_sdxl.py --model_path path/to/model/to/convert --checkpoint_path path/to/save/model/to --use_safetensors
+huggingface-cli login
 ```
 
-You can also save a model to Diffusers-multifolder layout with the [`~DiffusionPipeline.save_pretrained`] method. This creates a directory for you if it doesn't already exist, and it also saves the files as a safetensors file by default.
+스크립트를 사용하려면:
+
+1. 변환하려는 `.ckpt`  파일이 포함된 리포지토리를 Git으로 클론(clone)합니다.
+
+이 예제에서는 TemporalNet .ckpt 파일을 변환해 보겠습니다:
+
+```bash
+git lfs install
+git clone https://huggingface.co/CiaraRowles/TemporalNet
+```
+
+2. 체크포인트를 변환할 리포지토리에서 pull request를 엽니다:
+
+```bash
+cd TemporalNet && git fetch origin refs/pr/13:pr/13
+git checkout pr/13
+```
+
+3. 변환 스크립트에서 구성할 입력 인수는 여러 가지가 있지만 가장 중요한 인수는 다음과 같습니다:
+
+- `checkpoint_path`: 변환할 `.ckpt` 파일의 경로를 입력합니다.
+- `original_config_file`: 원래 아키텍처의 구성을 정의하는 YAML 파일입니다. 이 파일을 찾을 수 없는 경우 `.ckpt` 파일을 찾은 GitHub 리포지토리에서 YAML 파일을 검색해 보세요.
+- `dump_path`: 변환된 모델의 경로
+
+예를 들어, TemporalNet 모델은 Stable Diffusion v1.5 및 ControlNet 모델이기 때문에 ControlNet 리포지토리에서 cldm_v15.yaml 파일을 가져올 수 있습니다.
+
+4. 이제 스크립트를 실행하여 .ckpt 파일을 변환할 수 있습니다:
+
+```bash
+python ../diffusers/scripts/convert_original_stable_diffusion_to_diffusers.py --checkpoint_path temporalnetv3.ckpt --original_config_file cldm_v15.yaml --dump_path ./ --controlnet
+```
+
+5. 변환이 완료되면 변환된 모델을 업로드하고 결과물을 pull request [pull request](https://huggingface.co/CiaraRowles/TemporalNet/discussions/13)를 테스트하세요!
+
+```bash
+git push origin pr/13:refs/pr/13
+```
+
+## **Keras .pb or .h5**
+
+🧪 이 기능은 실험적인 기능입니다. 현재로서는 Stable Diffusion v1 체크포인트만 변환 KerasCV Space에서 지원됩니다.
+
+[KerasCV](https://keras.io/keras_cv/)는 [Stable Diffusion](https://github.com/keras-team/keras-cv/blob/master/keras_cv/models/stable_diffusion)  v1 및 v2에 대한 학습을 지원합니다. 그러나 추론 및 배포를 위한 Stable Diffusion 모델 실험을 제한적으로 지원하는 반면, 🤗 Diffusers는 다양한 [noise schedulers](https://huggingface.co/docs/diffusers/using-diffusers/schedulers), [flash attention](https://huggingface.co/docs/diffusers/optimization/xformers), and [other optimization techniques](https://huggingface.co/docs/diffusers/optimization/fp16) 등 이러한 목적을 위한 보다 완벽한 기능을 갖추고 있습니다.
+
+[Convert KerasCV](https://huggingface.co/spaces/sayakpaul/convert-kerascv-sd-diffusers) Space 변환은 `.pb` 또는 `.h5`을 PyTorch로 변환한 다음, 추론할 수 있도록 [`StableDiffusionPipeline`] 으로 감싸서 준비합니다. 변환된 체크포인트는 Hugging Face Hub의 리포지토리에 저장됩니다.
+
+예제로, textual-inversion으로 학습된 `[sayakpaul/textual-inversion-kerasio](https://huggingface.co/sayakpaul/textual-inversion-kerasio/tree/main)` 체크포인트를 변환해 보겠습니다. 이것은 특수 토큰  `<my-funny-cat>`을 사용하여 고양이로 이미지를 개인화합니다.
+
+KerasCV Space 변환에서는 다음을 입력할 수 있습니다:
+
+- Hugging Face 토큰.
+- UNet 과 텍스트 인코더(text encoder) 가중치를 다운로드하는 경로입니다. 모델을 어떻게 학습할지 방식에 따라, UNet과 텍스트 인코더의 경로를 모두 제공할 필요는 없습니다. 예를 들어, textual-inversion에는 텍스트 인코더의 임베딩만 필요하고 텍스트-이미지(text-to-image) 모델 변환에는 UNet 가중치만 필요합니다.
+- Placeholder 토큰은 textual-inversion 모델에만 적용됩니다.
+- `output_repo_prefix`는 변환된 모델이 저장되는 리포지토리의 이름입니다.
+
+**Submit** (제출) 버튼을 클릭하면 KerasCV 체크포인트가 자동으로 변환됩니다! 체크포인트가 성공적으로 변환되면, 변환된 체크포인트가 포함된 새 리포지토리로 연결되는 링크가 표시됩니다. 새 리포지토리로 연결되는 링크를 따라가면 변환된 모델을 사용해 볼 수 있는 추론 위젯이 포함된 모델 카드가 생성된 KerasCV Space 변환을 확인할 수 있습니다.
+
+코드를 사용하여 추론을 실행하려면 모델 카드의 오른쪽 상단 모서리에 있는 **Use in Diffusers**  버튼을 클릭하여 예시 코드를 복사하여 붙여넣습니다:
 
 ```py
-from diffusers import StableDiffusionXLPipeline
+from diffusers import DiffusionPipeline
 
-pipeline = StableDiffusionXLPipeline.from_single_file(
-    "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0.safetensors",
-)
-pipeline.save_pretrained()
+pipeline = DiffusionPipeline.from_pretrained("sayakpaul/textual-inversion-cat-kerascv_sd_diffusers_pipeline")
 ```
 
-Lastly, there are also Spaces, such as [SD To Diffusers](https://hf.co/spaces/diffusers/sd-to-diffusers) and [SD-XL To Diffusers](https://hf.co/spaces/diffusers/sdxl-to-diffusers), that provide a more user-friendly interface for converting models to Diffusers-multifolder layout. This is the easiest and most convenient option for converting layouts, and it'll open a PR on your model repository with the converted files. However, this option is not as reliable as running a script, and the Space may fail for more complicated models.
-
-## Single-file layout usage
-
-Now that you're familiar with the differences between the Diffusers-multifolder and single-file layout, this section shows you how to load models and pipeline components, customize configuration options for loading, and load local files with the [`~loaders.FromSingleFileMixin.from_single_file`] method.
-
-### Load a pipeline or model
-
-Pass the file path of the pipeline or model to the [`~loaders.FromSingleFileMixin.from_single_file`] method to load it.
-
-<hfoptions id="pipeline-model">
-<hfoption id="pipeline">
+그러면 다음과 같은 이미지를 생성할 수 있습니다:
 
 ```py
-from diffusers import StableDiffusionXLPipeline
+from diffusers import DiffusionPipeline
 
-ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0_0.9vae.safetensors"
-pipeline = StableDiffusionXLPipeline.from_single_file(ckpt_path)
+pipeline = DiffusionPipeline.from_pretrained("sayakpaul/textual-inversion-cat-kerascv_sd_diffusers_pipeline")
+pipeline.to("cuda")
+
+placeholder_token = "<my-funny-cat-token>"
+prompt = f"two {placeholder_token} getting married, photorealistic, high quality"
+image = pipeline(prompt, num_inference_steps=50).images[0]
 ```
 
-</hfoption>
-<hfoption id="model">
+## **A1111 LoRA files**
+
+[Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui) (A1111)은 Stable Diffusion을 위해 널리 사용되는 웹 UI로, [Civitai](https://civitai.com/) 와 같은 모델 공유 플랫폼을 지원합니다. 특히 LoRA 기법으로 학습된 모델은 학습 속도가 빠르고 완전히 파인튜닝된 모델보다 파일 크기가 훨씬 작기 때문에 인기가 높습니다.
+
+🤗 Diffusers는 [`~loaders.LoraLoaderMixin.load_lora_weights`]:를 사용하여 A1111 LoRA 체크포인트 불러오기를 지원합니다:
 
 ```py
-from diffusers import StableCascadeUNet
+from diffusers import DiffusionPipeline, UniPCMultistepScheduler
+import torch
 
-ckpt_path = "https://huggingface.co/stabilityai/stable-cascade/blob/main/stage_b_lite.safetensors"
-model = StableCascadeUNet.from_single_file(ckpt_path)
+pipeline = DiffusionPipeline.from_pretrained(
+    "andite/anything-v4.0", torch_dtype=torch.float16, safety_checker=None
+).to("cuda")
+pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
 ```
 
-</hfoption>
-</hfoptions>
+Civitai에서 LoRA 체크포인트를 다운로드하세요; 이 예제에서는  [Howls Moving Castle,Interior/Scenery LoRA (Ghibli Stlye)](https://civitai.com/models/14605?modelVersionId=19998) 체크포인트를 사용했지만, 어떤 LoRA 체크포인트든 자유롭게 사용해 보세요!
 
-Customize components in the pipeline by passing them directly to the [`~loaders.FromSingleFileMixin.from_single_file`] method. For example, you can use a different scheduler in a pipeline.
+```bash
+!wget https://civitai.com/api/download/models/19998 -O howls_moving_castle.safetensors
+```
+
+메서드를 사용하여 파이프라인에 LoRA 체크포인트를 불러옵니다:
 
 ```py
-from diffusers import StableDiffusionXLPipeline, DDIMScheduler
-
-ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0_0.9vae.safetensors"
-scheduler = DDIMScheduler()
-pipeline = StableDiffusionXLPipeline.from_single_file(ckpt_path, scheduler=scheduler)
+pipeline.load_lora_weights(".", weight_name="howls_moving_castle.safetensors")
 ```
 
-Or you could use a ControlNet model in the pipeline.
+이제 파이프라인을 사용하여 이미지를 생성할 수 있습니다:
 
 ```py
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+prompt = "masterpiece, illustration, ultra-detailed, cityscape, san francisco, golden gate bridge, california, bay area, in the snow, beautiful detailed starry sky"
+negative_prompt = "lowres, cropped, worst quality, low quality, normal quality, artifacts, signature, watermark, username, blurry, more than one bridge, bad architecture"
 
-ckpt_path = "https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v1-5-pruned-emaonly.safetensors"
-controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny")
-pipeline = StableDiffusionControlNetPipeline.from_single_file(ckpt_path, controlnet=controlnet)
+images = pipeline(
+    prompt=prompt,
+    negative_prompt=negative_prompt,
+    width=512,
+    height=512,
+    num_inference_steps=25,
+    num_images_per_prompt=4,
+    generator=torch.manual_seed(0),
+).images
 ```
 
-### Customize configuration options
-
-Models have a configuration file that define their attributes like the number of inputs in a UNet. Pipelines configuration options are available in the pipeline's class. For example, if you look at the [`StableDiffusionXLInstructPix2PixPipeline`] class, there is an option to scale the image latents with the `is_cosxl_edit` parameter.
-
-These configuration files can be found in the models Hub repository or another location from which the configuration file originated (for example, a GitHub repository or locally on your device).
-
-<hfoptions id="config-file">
-<hfoption id="Hub configuration file">
-
-> [!TIP]
-> The [`~loaders.FromSingleFileMixin.from_single_file`] method automatically maps the checkpoint to the appropriate model repository, but there are cases where it is useful to use the `config` parameter. For example, if the model components in the checkpoint are different from the original checkpoint or if a checkpoint doesn't have the necessary metadata to correctly determine the configuration to use for the pipeline.
-
-The [`~loaders.FromSingleFileMixin.from_single_file`] method automatically determines the configuration to use from the configuration file in the model repository. You could also explicitly specify the configuration to use by providing the repository id to the `config` parameter.
+마지막으로, 디스플레이에 이미지를 표시하는 헬퍼 함수를 만듭니다:
 
 ```py
-from diffusers import StableDiffusionXLPipeline
+from PIL import Image
 
-ckpt_path = "https://huggingface.co/segmind/SSD-1B/blob/main/SSD-1B.safetensors"
-repo_id = "segmind/SSD-1B"
 
-pipeline = StableDiffusionXLPipeline.from_single_file(ckpt_path, config=repo_id)
+def image_grid(imgs, rows=2, cols=2):
+    w, h = imgs[0].size
+    grid = Image.new("RGB", size=(cols * w, rows * h))
+
+    for i, img in enumerate(imgs):
+        grid.paste(img, box=(i % cols * w, i // cols * h))
+    return grid
+
+
+image_grid(images)
 ```
 
-The model loads the configuration file for the [UNet](https://huggingface.co/segmind/SSD-1B/blob/main/unet/config.json), [VAE](https://huggingface.co/segmind/SSD-1B/blob/main/vae/config.json), and [text encoder](https://huggingface.co/segmind/SSD-1B/blob/main/text_encoder/config.json) from their respective subfolders in the repository.
-
-</hfoption>
-<hfoption id="original configuration file">
-
-The [`~loaders.FromSingleFileMixin.from_single_file`] method can also load the original configuration file of a pipeline that is stored elsewhere. Pass a local path or URL of the original configuration file to the `original_config` parameter.
-
-```py
-from diffusers import StableDiffusionXLPipeline
-
-ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0_0.9vae.safetensors"
-original_config = "https://raw.githubusercontent.com/Stability-AI/generative-models/main/configs/inference/sd_xl_base.yaml"
-
-pipeline = StableDiffusionXLPipeline.from_single_file(ckpt_path, original_config=original_config)
-```
-
-> [!TIP]
-> Diffusers attempts to infer the pipeline components based on the type signatures of the pipeline class when you use `original_config` with `local_files_only=True`, instead of fetching the configuration files from the model repository on the Hub. This prevents backward breaking changes in code that can't connect to the internet to fetch the necessary configuration files.
->
-> This is not as reliable as providing a path to a local model repository with the `config` parameter, and might lead to errors during pipeline configuration. To avoid errors, run the pipeline with `local_files_only=False` once to download the appropriate pipeline configuration files to the local cache.
-
-</hfoption>
-</hfoptions>
-
-While the configuration files specify the pipeline or models default parameters, you can override them by providing the parameters directly to the [`~loaders.FromSingleFileMixin.from_single_file`] method. Any parameter supported by the model or pipeline class can be configured in this way.
-
-<hfoptions id="override">
-<hfoption id="pipeline">
-
-For example, to scale the image latents in [`StableDiffusionXLInstructPix2PixPipeline`] pass the `is_cosxl_edit` parameter.
-
-```python
-from diffusers import StableDiffusionXLInstructPix2PixPipeline
-
-ckpt_path = "https://huggingface.co/stabilityai/cosxl/blob/main/cosxl_edit.safetensors"
-pipeline = StableDiffusionXLInstructPix2PixPipeline.from_single_file(ckpt_path, config="diffusers/sdxl-instructpix2pix-768", is_cosxl_edit=True)
-```
-
-</hfoption>
-<hfoption id="model">
-
-For example, to upcast the attention dimensions in a [`UNet2DConditionModel`] pass the `upcast_attention` parameter.
-
-```python
-from diffusers import UNet2DConditionModel
-
-ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0_0.9vae.safetensors"
-model = UNet2DConditionModel.from_single_file(ckpt_path, upcast_attention=True)
-```
-
-</hfoption>
-</hfoptions>
-
-### Local files
-
-In Diffusers>=v0.28.0, the [`~loaders.FromSingleFileMixin.from_single_file`] method attempts to configure a pipeline or model by inferring the model type from the keys in the checkpoint file. The inferred model type is used to determine the appropriate model repository on the Hugging Face Hub to configure the model or pipeline.
-
-For example, any single file checkpoint based on the Stable Diffusion XL base model will use the [stabilityai/stable-diffusion-xl-base-1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) model repository to configure the pipeline.
-
-But if you're working in an environment with restricted internet access, you should download the configuration files with the [`~huggingface_hub.snapshot_download`] function, and the model checkpoint with the [`~huggingface_hub.hf_hub_download`] function. By default, these files are downloaded to the Hugging Face Hub [cache directory](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache), but you can specify a preferred directory to download the files to with the `local_dir` parameter.
-
-Pass the configuration and checkpoint paths to the [`~loaders.FromSingleFileMixin.from_single_file`] method to load locally.
-
-<hfoptions id="local">
-<hfoption id="Hub cache directory">
-
-```python
-from huggingface_hub import hf_hub_download, snapshot_download
-
-my_local_checkpoint_path = hf_hub_download(
-    repo_id="segmind/SSD-1B",
-    filename="SSD-1B.safetensors"
-)
-
-my_local_config_path = snapshot_download(
-    repo_id="segmind/SSD-1B",
-    allow_patterns=["*.json", "**/*.json", "*.txt", "**/*.txt"]
-)
-
-pipeline = StableDiffusionXLPipeline.from_single_file(my_local_checkpoint_path, config=my_local_config_path, local_files_only=True)
-```
-
-</hfoption>
-<hfoption id="specific local directory">
-
-```python
-from huggingface_hub import hf_hub_download, snapshot_download
-
-my_local_checkpoint_path = hf_hub_download(
-    repo_id="segmind/SSD-1B",
-    filename="SSD-1B.safetensors"
-    local_dir="my_local_checkpoints"
-)
-
-my_local_config_path = snapshot_download(
-    repo_id="segmind/SSD-1B",
-    allow_patterns=["*.json", "**/*.json", "*.txt", "**/*.txt"]
-    local_dir="my_local_config"
-)
-
-pipeline = StableDiffusionXLPipeline.from_single_file(my_local_checkpoint_path, config=my_local_config_path, local_files_only=True)
-```
-
-</hfoption>
-</hfoptions>
-
-#### Local files without symlink
-
-> [!TIP]
-> In huggingface_hub>=v0.23.0, the `local_dir_use_symlinks` argument isn't necessary for the [`~huggingface_hub.hf_hub_download`] and [`~huggingface_hub.snapshot_download`] functions.
-
-The [`~loaders.FromSingleFileMixin.from_single_file`] method relies on the [huggingface_hub](https://hf.co/docs/huggingface_hub/index) caching mechanism to fetch and store checkpoints and configuration files for models and pipelines. If you're working with a file system that does not support symlinking, you should download the checkpoint file to a local directory first, and disable symlinking with the `local_dir_use_symlink=False` parameter in the [`~huggingface_hub.hf_hub_download`] function and [`~huggingface_hub.snapshot_download`] functions.
-
-```python
-from huggingface_hub import hf_hub_download, snapshot_download
-
-my_local_checkpoint_path = hf_hub_download(
-    repo_id="segmind/SSD-1B",
-    filename="SSD-1B.safetensors"
-    local_dir="my_local_checkpoints",
-    local_dir_use_symlinks=False
-)
-print("My local checkpoint: ", my_local_checkpoint_path)
-
-my_local_config_path = snapshot_download(
-    repo_id="segmind/SSD-1B",
-    allow_patterns=["*.json", "**/*.json", "*.txt", "**/*.txt"]
-    local_dir_use_symlinks=False,
-)
-print("My local config: ", my_local_config_path)
-```
-
-Then you can pass the local paths to the `pretrained_model_link_or_path` and `config` parameters.
-
-```python
-pipeline = StableDiffusionXLPipeline.from_single_file(my_local_checkpoint_path, config=my_local_config_path, local_files_only=True)
-```
+<div class="flex justify-center">
+  <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/a1111-lora-sf.png" />
+</div>

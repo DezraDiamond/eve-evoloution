@@ -10,46 +10,91 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Image-to-image
+# 텍스트 기반 image-to-image 생성
 
-The Stable Diffusion model can also be applied to image-to-image generation by passing a text prompt and an initial image to condition the generation of new images.
+[[open-in-colab]]
 
-The [`StableDiffusionImg2ImgPipeline`] uses the diffusion-denoising mechanism proposed in [SDEdit: Guided Image Synthesis and Editing with Stochastic Differential Equations](https://huggingface.co/papers/2108.01073) by Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, Stefano Ermon.
+[`StableDiffusionImg2ImgPipeline`]을 사용하면 텍스트 프롬프트와 시작 이미지를 전달하여 새 이미지 생성의 조건을 지정할 수 있습니다.
 
-The abstract from the paper is:
+시작하기 전에 필요한 라이브러리가 모두 설치되어 있는지 확인하세요:
 
-*Guided image synthesis enables everyday users to create and edit photo-realistic images with minimum effort. The key challenge is balancing faithfulness to the user input (e.g., hand-drawn colored strokes) and realism of the synthesized image. Existing GAN-based methods attempt to achieve such balance using either conditional GANs or GAN inversions, which are challenging and often require additional training data or loss functions for individual applications. To address these issues, we introduce a new image synthesis and editing method, Stochastic Differential Editing (SDEdit), based on a diffusion model generative prior, which synthesizes realistic images by iteratively denoising through a stochastic differential equation (SDE). Given an input image with user guide of any type, SDEdit first adds noise to the input, then subsequently denoises the resulting image through the SDE prior to increase its realism. SDEdit does not require task-specific training or inversions and can naturally achieve the balance between realism and faithfulness. SDEdit significantly outperforms state-of-the-art GAN-based methods by up to 98.09% on realism and 91.72% on overall satisfaction scores, according to a human perception study, on multiple tasks, including stroke-based image synthesis and editing as well as image compositing.*
+```bash
+!pip install diffusers transformers ftfy accelerate
+```
+
+[`nitrosocke/Ghibli-Diffusion`](https://huggingface.co/nitrosocke/Ghibli-Diffusion)과 같은 사전학습된 stable diffusion 모델로 [`StableDiffusionImg2ImgPipeline`]을 생성하여 시작하세요.
+
+
+```python
+import torch
+import requests
+from PIL import Image
+from io import BytesIO
+from diffusers import StableDiffusionImg2ImgPipeline
+
+device = "cuda"
+pipe = StableDiffusionImg2ImgPipeline.from_pretrained("nitrosocke/Ghibli-Diffusion", torch_dtype=torch.float16).to(
+    device
+)
+```
+
+초기 이미지를 다운로드하고 사전 처리하여 파이프라인에 전달할 수 있습니다:
+
+```python
+url = "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/assets/stable-samples/img2img/sketch-mountains-input.jpg"
+
+response = requests.get(url)
+init_image = Image.open(BytesIO(response.content)).convert("RGB")
+init_image.thumbnail((768, 768))
+init_image
+```
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/YiYiXu/test-doc-assets/resolve/main/image_2_image_using_diffusers_cell_8_output_0.jpeg"/>
+</div>
 
 <Tip>
 
-Make sure to check out the Stable Diffusion [Tips](fort-obsidian/diffusers/docs/source/en/api/pipelines/stable_diffusion/overview.md#tips) section to learn how to explore the tradeoff between scheduler speed and quality, and how to reuse pipeline components efficiently!
+💡 `strength`는 입력 이미지에 추가되는 노이즈의 양을 제어하는 0.0에서 1.0 사이의 값입니다. 1.0에 가까운 값은 다양한 변형을 허용하지만 입력 이미지와 의미적으로 일치하지 않는 이미지를 생성합니다.
 
 </Tip>
 
-## StableDiffusionImg2ImgPipeline
+프롬프트를 정의하고(지브리 스타일(Ghibli-style)에 맞게 조정된 이 체크포인트의 경우 프롬프트 앞에 `ghibli style` 토큰을 붙여야 합니다) 파이프라인을 실행합니다:
 
-[[autodoc]] StableDiffusionImg2ImgPipeline
-	- all
-	- __call__
-	- enable_attention_slicing
-	- disable_attention_slicing
-	- enable_xformers_memory_efficient_attention
-	- disable_xformers_memory_efficient_attention
-	- load_textual_inversion
-	- from_single_file
-	- load_lora_weights
-	- save_lora_weights
+```python
+prompt = "ghibli style, a fantasy landscape with castles"
+generator = torch.Generator(device=device).manual_seed(1024)
+image = pipe(prompt=prompt, image=init_image, strength=0.75, guidance_scale=7.5, generator=generator).images[0]
+image
+```
 
-## StableDiffusionPipelineOutput
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/ghibli-castles.png"/>
+</div>
 
-[[autodoc]] pipelines.stable_diffusion.StableDiffusionPipelineOutput
+다른 스케줄러로 실험하여 출력에 어떤 영향을 미치는지 확인할 수도 있습니다:
 
-## FlaxStableDiffusionImg2ImgPipeline
+```python
+from diffusers import LMSDiscreteScheduler
 
-[[autodoc]] FlaxStableDiffusionImg2ImgPipeline
-	- all
-	- __call__
+lms = LMSDiscreteScheduler.from_config(pipe.scheduler.config)
+pipe.scheduler = lms
+generator = torch.Generator(device=device).manual_seed(1024)
+image = pipe(prompt=prompt, image=init_image, strength=0.75, guidance_scale=7.5, generator=generator).images[0]
+image
+```
 
-## FlaxStableDiffusionPipelineOutput
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/lms-ghibli.png"/>
+</div>
 
-[[autodoc]] pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput
+아래 공백을 확인하고 `strength` 값을 다르게 설정하여 이미지를 생성해 보세요. `strength`를 낮게 설정하면 원본 이미지와 더 유사한 이미지가 생성되는 것을 확인할 수 있습니다.
+
+자유롭게 스케줄러를 [`LMSDiscreteScheduler`]로 전환하여 출력에 어떤 영향을 미치는지 확인해 보세요.
+
+<iframe
+	src="https://stevhliu-ghibli-img2img.hf.space"
+	frameborder="0"
+	width="850"
+	height="500"
+></iframe>

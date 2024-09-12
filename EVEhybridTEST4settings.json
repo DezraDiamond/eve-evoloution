@@ -1,0 +1,27 @@
+{
+    "workbench.colorTheme": "Abyss",
+    "workbench.editor.enablePreviewFromCodeNavigation": true,
+    "workbench.editor.defaultBinaryEditor": "vscode.videoPreview",
+    "workbench.editor.enablePreviewFromQuickOpen": true,
+    "workbench.editor.preferHistoryBasedLanguageDetection": true,
+    "[markdown]": {
+
+        "editor.unicodeHighlight.ambiguousCharacters": true,
+        "editor.unicodeHighlight.invisibleCharacters": false,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.wordWrap": "on",
+        "editor.quickSuggestions": {
+            "comments": "off",
+            "strings": "off",
+            "other": "off"
+        }
+    },
+    "launch": {
+        "configurations": [
+
+        ]
+    },
+    "[bat]": {
+        
+    }
+}
